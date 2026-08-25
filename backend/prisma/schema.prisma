@@ -1,0 +1,49 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+
+}
+
+enum Role {
+  ADMIN
+  EMPLOYEE
+}
+
+enum OvertimeStatus {
+  NONE
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model User {
+  id          String       @id @default(uuid())
+  name        String
+  email       String       @unique
+  password    String
+  role        Role         @default(EMPLOYEE)
+  createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @updatedAt
+  attendances Attendance[]
+}
+
+model Attendance {
+  id             String         @id @default(uuid())
+  userId         String
+  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date           DateTime       @default(now())
+  inTime         DateTime       @default(now())
+  outTime        DateTime?
+  workingHours   Float?
+  task           String?
+  assignedTask   String?
+  overtimeHours  Float?         @default(0.0)
+  overtimeStatus OvertimeStatus @default(NONE)
+  createdAt      DateTime       @default(now())
+  updatedAt      DateTime       @updatedAt
+
+  @@index([userId, date])
+}
