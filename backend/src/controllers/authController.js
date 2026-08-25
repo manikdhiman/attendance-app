@@ -11,6 +11,21 @@ exports.register = async (req, res) => {
       return res.status(400).json({ message: 'Email is already registered' });
     }
 
+    let assignedRole = 'EMPLOYEE';
+
+    if (role === 'ADMIN') {
+      const existingAdmin = await prisma.user.findFirst({
+        where: { role: 'ADMIN' },
+      });
+
+      if (existingAdmin) {
+        return res.status(403).json({
+          message: 'An Admin account already exists. Only existing Admins can create new Admins.',
+        });
+      }
+      assignedRole = 'ADMIN';
+    }
+
     const hashedPassword = await bcrypt.hash(password, 10);
 
     const user = await prisma.user.create({
@@ -18,17 +33,17 @@ exports.register = async (req, res) => {
         name,
         email,
         password: hashedPassword,
-        role: role === 'ADMIN' ? 'ADMIN' : 'EMPLOYEE',
+        role: assignedRole,
       },
       select: { id: true, name: true, email: true, role: true },
     });
 
     return res.status(201).json({ message: 'User registered successfully', user });
   } catch (error) {
-    return res.status(500).json({ message: 'Registration failed', error: error.message });
+    console.error('Registration Error Details:', error); // Logs directly to PowerShell
+    return res.status(500).json({ message: error.message || 'Registration failed' });
   }
 };
-
 exports.login = async (req, res) => {
   const { email, password } = req.body;
 

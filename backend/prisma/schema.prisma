@@ -1,15 +1,18 @@
 generator client {
-  provider = "prisma-client-js"
+  provider        = "prisma-client-js"
+  previewFeatures = ["multiSchema"]
 }
 
 datasource db {
   provider = "postgresql"
-
+  schemas  = ["attendance_app"]
 }
 
 enum Role {
   ADMIN
   EMPLOYEE
+
+  @@schema("attendance_app")
 }
 
 enum OvertimeStatus {
@@ -17,6 +20,8 @@ enum OvertimeStatus {
   PENDING
   APPROVED
   REJECTED
+
+  @@schema("attendance_app")
 }
 
 model User {
@@ -28,6 +33,8 @@ model User {
   createdAt   DateTime     @default(now())
   updatedAt   DateTime     @updatedAt
   attendances Attendance[]
+
+  @@schema("attendance_app")
 }
 
 model Attendance {
@@ -46,4 +53,5 @@ model Attendance {
   updatedAt      DateTime       @updatedAt
 
   @@index([userId, date])
+  @@schema("attendance_app")
 }
