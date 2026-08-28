@@ -10,5 +10,6 @@ router.put('/users/:id', adminController.updateUser);
 router.patch('/users/:id/ban', adminController.toggleBanUser);
 router.delete('/users/:id', adminController.deleteUser);
 router.get('/holidays', adminController.getHolidays);
+router.patch('/review-admin-request', adminController.reviewAdminRequest);
 
 module.exports = router;

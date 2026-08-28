@@ -2,55 +2,65 @@ const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const prisma = require('../config/db');
 
+// Registration logic:
+// - manikdhiman2005@gmail.com is auto-promoted to ADMIN
+// - If user requests Admin, role starts as EMPLOYEE and adminRequestStatus becomes 'PENDING'
+// - Every new employee is isActive: true by default
 exports.register = async (req, res) => {
-  const { name, email, password, role } = req.body;
+  const { name, email, password, requestAdminRole } = req.body;
 
   try {
-    const existingUser = await prisma.user.findUnique({ where: { email } });
-    if (existingUser) {
-      return res.status(400).json({ message: 'Email is already registered' });
-    }
-
-    let assignedRole = 'EMPLOYEE';
-
-    if (role === 'ADMIN') {
-      const existingAdmin = await prisma.user.findFirst({
-        where: { role: 'ADMIN' },
-      });
-
-      if (existingAdmin) {
-        return res.status(403).json({
-          message: 'An Admin account already exists. Only existing Admins can create new Admins.',
-        });
-      }
-      assignedRole = 'ADMIN';
+    const existing = await prisma.user.findUnique({ where: { email } });
+    if (existing) {
+      return res.status(400).json({ message: 'User already exists with this email' });
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
+    const isSuperAdminEmail = email.toLowerCase() === 'manikdhiman2005@gmail.com';
 
-    const user = await prisma.user.create({
+    const newUser = await prisma.user.create({
       data: {
         name,
         email,
         password: hashedPassword,
-        role: assignedRole,
+        role: isSuperAdminEmail ? 'ADMIN' : 'EMPLOYEE',
+        isActive: true, // Always active upon signup
+        adminRequestStatus: isSuperAdminEmail ? 'APPROVED' : requestAdminRole ? 'PENDING' : 'NONE',
+        baseSalary: 17000.0,
+        overtimeRate: 150.0,
       },
-      select: { id: true, name: true, email: true, role: true },
     });
 
-    return res.status(201).json({ message: 'User registered successfully', user });
+    return res.status(201).json({
+      message: isSuperAdminEmail
+        ? 'Super Admin account created successfully'
+        : requestAdminRole
+        ? 'Account created. Admin privileges are pending approval by Super Admin.'
+        : 'Account created successfully',
+      user: { id: newUser.id, name: newUser.name, email: newUser.email, role: newUser.role },
+    });
   } catch (error) {
-    console.error('Registration Error Details:', error); // Logs directly to PowerShell
-    return res.status(500).json({ message: error.message || 'Registration failed' });
+    return res.status(500).json({ message: 'Registration failed', error: error.message });
   }
 };
+
 exports.login = async (req, res) => {
   const { email, password } = req.body;
 
   try {
     const user = await prisma.user.findUnique({ where: { email } });
     if (!user) {
-      return res.status(400).json({ message: 'Invalid credentials' });
+      return res.status(400).json({ message: 'Invalid email or password' });
+    }
+
+    // Auto-fix: Ensure primary admin email is always active and ADMIN role
+    if (email.toLowerCase() === 'manikdhiman2005@gmail.com' && (!user.isActive || user.role !== 'ADMIN')) {
+      await prisma.user.update({
+        where: { email },
+        data: { isActive: true, role: 'ADMIN', adminRequestStatus: 'APPROVED' },
+      });
+      user.isActive = true;
+      user.role = 'ADMIN';
     }
 
     if (!user.isActive) {
@@ -59,7 +69,7 @@ exports.login = async (req, res) => {
 
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
-      return res.status(400).json({ message: 'Invalid credentials' });
+      return res.status(400).json({ message: 'Invalid email or password' });
     }
 
     const token = jwt.sign(

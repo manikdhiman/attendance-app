@@ -1,10 +1,9 @@
 generator client {
-  provider        = "prisma-client-js"
+  provider = "prisma-client-js"
 }
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
   schemas  = ["attendance_app"]
 }
 
@@ -24,18 +23,28 @@ enum OvertimeStatus {
   @@schema("attendance_app")
 }
 
+enum AdminRequestStatus {
+  NONE
+  PENDING
+  APPROVED
+  REJECTED
+
+  @@schema("attendance_app")
+}
+
 model User {
-  id           String       @id @default(uuid())
-  name         String
-  email        String       @unique
-  password     String
-  role         Role         @default(EMPLOYEE)
-  baseSalary   Float        @default(0.0)
-  overtimeRate Float        @default(150.0)
-  isActive     Boolean      @default(true) // Set to false to disband/ban user
-  createdAt    DateTime     @default(now())
-  updatedAt    DateTime     @updatedAt
-  attendances  Attendance[]
+  id                 String             @id @default(uuid())
+  name               String
+  email              String             @unique
+  password           String
+  role               Role               @default(EMPLOYEE)
+  baseSalary         Float              @default(0.0)
+  overtimeRate       Float              @default(150.0)
+  isActive           Boolean            @default(true)
+  adminRequestStatus AdminRequestStatus @default(NONE)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  attendances        Attendance[]
 
   @@schema("attendance_app")
 }

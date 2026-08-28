@@ -89,3 +89,24 @@ exports.getHolidays = async (req, res) => {
     return res.status(500).json({ message: 'Failed to fetch holidays', error: error.message });
   }
 };
+// Approve or Reject Admin Role Requests
+exports.reviewAdminRequest = async (req, res) => {
+  const { userId, approve } = req.body; // approve: boolean
+
+  try {
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        role: approve ? 'ADMIN' : 'EMPLOYEE',
+        adminRequestStatus: approve ? 'APPROVED' : 'REJECTED',
+      },
+    });
+
+    return res.status(200).json({
+      message: `User is now ${approve ? 'an Admin' : 'an Employee (Request Rejected)'}`,
+      user: updatedUser,
+    });
+  } catch (error) {
+    return res.status(500).json({ message: 'Failed to update admin role', error: error.message });
+  }
+};
