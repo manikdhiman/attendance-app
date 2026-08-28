@@ -1,10 +1,10 @@
 generator client {
   provider        = "prisma-client-js"
-  previewFeatures = ["multiSchema"]
 }
 
 datasource db {
   provider = "postgresql"
+  url      = env("DATABASE_URL")
   schemas  = ["attendance_app"]
 }
 
@@ -25,14 +25,17 @@ enum OvertimeStatus {
 }
 
 model User {
-  id          String       @id @default(uuid())
-  name        String
-  email       String       @unique
-  password    String
-  role        Role         @default(EMPLOYEE)
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @updatedAt
-  attendances Attendance[]
+  id           String       @id @default(uuid())
+  name         String
+  email        String       @unique
+  password     String
+  role         Role         @default(EMPLOYEE)
+  baseSalary   Float        @default(0.0)
+  overtimeRate Float        @default(150.0)
+  isActive     Boolean      @default(true) // Set to false to disband/ban user
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+  attendances  Attendance[]
 
   @@schema("attendance_app")
 }
@@ -53,5 +56,14 @@ model Attendance {
   updatedAt      DateTime       @updatedAt
 
   @@index([userId, date])
+  @@schema("attendance_app")
+}
+
+model Holiday {
+  id        String   @id @default(uuid())
+  title     String
+  date      DateTime @unique
+  createdAt DateTime @default(now())
+
   @@schema("attendance_app")
 }
