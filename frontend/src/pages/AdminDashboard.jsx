@@ -28,20 +28,52 @@ const AdminDashboard = () => {
     password: '',
   });
 
+  // Calculate 1-hour rate dynamically: Base Salary / Days in Selected Month / 8 Shift Hours
+  const getDynamicHourlyRate = (baseSalary, monthStr = selectedMonth) => {
+    if (!baseSalary || parseFloat(baseSalary) <= 0) return 0;
+    const [year, month] = monthStr.split('-').map(Number);
+    const totalDaysInMonth = new Date(year, month, 0).getDate();
+    const shiftHours = 8;
+
+    const perDayRate = parseFloat(baseSalary) / totalDaysInMonth;
+    const hourlyRate = perDayRate / shiftHours;
+    return Math.round(hourlyRate);
+  };
+
+  const getDynamicDailyRate = (baseSalary, monthStr = selectedMonth) => {
+    if (!baseSalary || parseFloat(baseSalary) <= 0) return 0;
+    const [year, month] = monthStr.split('-').map(Number);
+    const totalDaysInMonth = new Date(year, month, 0).getDate();
+    return Math.round(parseFloat(baseSalary) / totalDaysInMonth);
+  };
+
   const fetchUsersAndRecords = async () => {
     try {
-      const [recordsRes, usersRes, holidaysRes] = await Promise.all([
+      const [recordsRes, usersRes, holidaysRes] = await Promise.allSettled([
         api.get('/attendance/records'),
         api.get('/admin/users'),
         api.get('/admin/holidays'),
       ]);
 
-      setRecords(recordsRes.data.records);
-      setEmployees(usersRes.data.users);
-      setHolidays(holidaysRes.data.holidays || []);
+      if (recordsRes.status === 'fulfilled') {
+        const d = recordsRes.value.data;
+        setRecords(Array.isArray(d) ? d : d?.records || []);
+      }
 
-      if (!selectedEmployeeId && usersRes.data.users.length > 0) {
-        setSelectedEmployeeId(usersRes.data.users[0].id);
+      if (usersRes.status === 'fulfilled') {
+        const d = usersRes.value.data;
+        const userList = Array.isArray(d) ? d : d?.users || [];
+        setEmployees(userList);
+
+        setSelectedEmployeeId((prev) => {
+          if (prev && userList.some((u) => u.id === prev)) return prev;
+          return userList.length > 0 ? userList[0].id : '';
+        });
+      }
+
+      if (holidaysRes.status === 'fulfilled') {
+        const d = holidaysRes.value.data;
+        setHolidays(Array.isArray(d) ? d : d?.holidays || []);
       }
     } catch (err) {
       console.error('Error fetching data:', err);
@@ -52,7 +84,10 @@ const AdminDashboard = () => {
     try {
       setLoadingPayroll(true);
       const res = await api.get(`/salary/payroll?month=${selectedMonth}`);
-      setPayroll(res.data.payroll || []);
+      const parsedPayroll = Array.isArray(res.data)
+        ? res.data
+        : res.data?.payroll || [];
+      setPayroll(parsedPayroll);
     } catch (err) {
       console.error('Error fetching payroll:', err);
     } finally {
@@ -71,7 +106,8 @@ const AdminDashboard = () => {
   const filteredRecords = useMemo(() => {
     return records.filter((r) => {
       const matchEmp = selectedEmployeeId ? r.userId === selectedEmployeeId : true;
-      const matchMonth = selectedMonth ? r.date.startsWith(selectedMonth) : true;
+      const recordDateStr = new Date(r.date).toISOString().slice(0, 7);
+      const matchMonth = selectedMonth ? recordDateStr === selectedMonth : true;
       return matchEmp && matchMonth;
     });
   }, [records, selectedEmployeeId, selectedMonth]);
@@ -85,7 +121,8 @@ const AdminDashboard = () => {
 
     const holidayMap = new Map();
     holidays.forEach((h) => {
-      holidayMap.set(h.date.slice(0, 10), h.title);
+      const dateKey = new Date(h.date).toISOString().slice(0, 10);
+      holidayMap.set(dateKey, h.title);
     });
 
     const days = [];
@@ -98,7 +135,11 @@ const AdminDashboard = () => {
       const dateStr = `${year}-${String(month).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
       const isSunday = dateObj.getDay() === 0;
       const holidayName = holidayMap.get(dateStr);
-      const record = filteredRecords.find((r) => r.date.startsWith(dateStr));
+      
+      const record = filteredRecords.find((r) => {
+        const rDateKey = new Date(r.date).toISOString().slice(0, 10);
+        return rDateKey === dateStr;
+      });
 
       days.push({
         dayNumber: d,
@@ -161,12 +202,13 @@ const AdminDashboard = () => {
   };
 
   const handleOpenEditModal = (user) => {
+    const calculatedOt = getDynamicHourlyRate(user.baseSalary);
     setEditUserModal(user.id);
     setUserFormData({
       name: user.name,
       email: user.email,
       baseSalary: user.baseSalary,
-      overtimeRate: user.overtimeRate,
+      overtimeRate: calculatedOt,
       password: '',
     });
   };
@@ -174,7 +216,11 @@ const AdminDashboard = () => {
   const handleSaveUserEdit = async (e) => {
     e.preventDefault();
     try {
-      await api.put(`/admin/users/${editUserModal}`, userFormData);
+      const payload = {
+        ...userFormData,
+        overtimeRate: getDynamicHourlyRate(userFormData.baseSalary),
+      };
+      await api.put(`/admin/users/${editUserModal}`, payload);
       setEditUserModal(null);
       fetchUsersAndRecords();
       fetchPayroll();
@@ -253,13 +299,17 @@ const AdminDashboard = () => {
                 <select
                   value={selectedEmployeeId}
                   onChange={(e) => setSelectedEmployeeId(e.target.value)}
-                  className="p-2 border rounded bg-slate-50 text-sm font-medium text-gray-700 outline-none focus:ring-2 focus:ring-indigo-500"
+                  className="p-2 border rounded bg-slate-50 text-sm font-medium text-gray-700 outline-none focus:ring-2 focus:ring-indigo-500 min-w-[180px]"
                 >
-                  {employees.map((emp) => (
-                    <option key={emp.id} value={emp.id}>
-                      {emp.name} {!emp.isActive ? '(Disbanded)' : ''}
-                    </option>
-                  ))}
+                  {employees.length === 0 ? (
+                    <option value="">No Employees Found</option>
+                  ) : (
+                    employees.map((emp) => (
+                      <option key={emp.id} value={emp.id}>
+                        {emp.name} {!emp.isActive ? '(Disbanded)' : ''}
+                      </option>
+                    ))
+                  )}
                 </select>
               </div>
 
@@ -326,52 +376,68 @@ const AdminDashboard = () => {
               </tr>
             </thead>
             <tbody>
-              {employees.map((u) => (
-                <tr key={u.id} className="border-b hover:bg-gray-50 transition">
-                  <td className="p-4">
-                    <p className="font-semibold text-gray-800">{u.name}</p>
-                    <p className="text-xs text-gray-500">{u.email}</p>
-                  </td>
-                  <td className="p-4">
-                    <span className={`px-2 py-0.5 rounded text-xs font-bold ${u.role === 'ADMIN' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-700'}`}>
-                      {u.role}
-                    </span>
-                  </td>
-                  <td className="p-4 font-bold text-slate-800">₹{u.baseSalary?.toLocaleString('en-IN')}</td>
-                  <td className="p-4 font-medium text-slate-700">₹{u.overtimeRate}/hr</td>
-                  <td className="p-4">
-                    <span className={`px-2 py-0.5 rounded text-xs font-bold ${u.isActive ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
-                      {u.isActive ? 'Active' : 'Disbanded / Banned'}
-                    </span>
-                  </td>
-                  <td className="p-4 space-x-2">
-                    <button
-                      onClick={() => handleOpenEditModal(u)}
-                      className="text-xs bg-indigo-600 text-white px-3 py-1.5 rounded hover:bg-indigo-700 cursor-pointer"
-                    >
-                      Edit Info / Salary
-                    </button>
-                    {u.role !== 'ADMIN' && (
-                      <>
-                        <button
-                          onClick={() => handleToggleBan(u.id, u.isActive)}
-                          className={`text-xs px-3 py-1.5 rounded font-semibold text-white cursor-pointer ${
-                            u.isActive ? 'bg-amber-600 hover:bg-amber-700' : 'bg-emerald-600 hover:bg-emerald-700'
-                          }`}
-                        >
-                          {u.isActive ? 'Disband ID' : 'Activate ID'}
-                        </button>
-                        <button
-                          onClick={() => handleDeleteUser(u.id)}
-                          className="text-xs bg-rose-600 text-white px-3 py-1.5 rounded hover:bg-rose-700 cursor-pointer"
-                        >
-                          Delete
-                        </button>
-                      </>
-                    )}
+              {employees.length === 0 ? (
+                <tr>
+                  <td colSpan="6" className="p-8 text-center text-gray-500">
+                    No employees registered yet.
                   </td>
                 </tr>
-              ))}
+              ) : (
+                employees.map((u) => {
+                  const dynamicOtRate = getDynamicHourlyRate(u.baseSalary);
+                  const dynamicDayRate = getDynamicDailyRate(u.baseSalary);
+
+                  return (
+                    <tr key={u.id} className="border-b hover:bg-gray-50 transition">
+                      <td className="p-4">
+                        <p className="font-semibold text-gray-800">{u.name}</p>
+                        <p className="text-xs text-gray-500">{u.email}</p>
+                      </td>
+                      <td className="p-4">
+                        <span className={`px-2 py-0.5 rounded text-xs font-bold ${u.role === 'ADMIN' ? 'bg-purple-100 text-purple-700' : 'bg-gray-100 text-gray-700'}`}>
+                          {u.role}
+                        </span>
+                      </td>
+                      <td className="p-4 font-bold text-slate-800">₹{u.baseSalary?.toLocaleString('en-IN')}</td>
+                      <td className="p-4 font-medium text-slate-700">
+                        <span className="font-bold text-indigo-600">₹{dynamicOtRate}/hr</span>
+                        <span className="text-[11px] text-gray-400 block">(₹{dynamicDayRate}/day)</span>
+                      </td>
+                      <td className="p-4">
+                        <span className={`px-2 py-0.5 rounded text-xs font-bold ${u.isActive ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800'}`}>
+                          {u.isActive ? 'Active' : 'Disbanded / Banned'}
+                        </span>
+                      </td>
+                      <td className="p-4 space-x-2">
+                        <button
+                          onClick={() => handleOpenEditModal(u)}
+                          className="text-xs bg-indigo-600 text-white px-3 py-1.5 rounded hover:bg-indigo-700 cursor-pointer"
+                        >
+                          Edit Info / Salary
+                        </button>
+                        {u.role !== 'ADMIN' && (
+                          <>
+                            <button
+                              onClick={() => handleToggleBan(u.id, u.isActive)}
+                              className={`text-xs px-3 py-1.5 rounded font-semibold text-white cursor-pointer ${
+                                u.isActive ? 'bg-amber-600 hover:bg-amber-700' : 'bg-emerald-600 hover:bg-emerald-700'
+                              }`}
+                            >
+                              {u.isActive ? 'Disband ID' : 'Activate ID'}
+                            </button>
+                            <button
+                              onClick={() => handleDeleteUser(u.id)}
+                              className="text-xs bg-rose-600 text-white px-3 py-1.5 rounded hover:bg-rose-700 cursor-pointer"
+                            >
+                              Delete
+                            </button>
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
             </tbody>
           </table>
         </div>
@@ -404,7 +470,7 @@ const AdminDashboard = () => {
                   }
 
                   const rec = slot.record;
-                  const isPaidHoliday = slot.isSunday || slot.holidayName;
+                  const isPaidHoliday = slot.isSunday || Boolean(slot.holidayName);
 
                   let cardStyle = 'bg-white border-gray-200';
                   if (rec) cardStyle = 'bg-emerald-50/50 border-emerald-300';
@@ -422,8 +488,8 @@ const AdminDashboard = () => {
                             Present
                           </span>
                         ) : slot.holidayName ? (
-                          <span className="text-[10px] bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded" title={slot.holidayName}>
-                            Paid Holiday
+                          <span className="text-[10px] bg-amber-200 text-amber-900 font-bold px-1.5 py-0.5 rounded" title={slot.holidayName}>
+                            {slot.holidayName} (Paid)
                           </span>
                         ) : slot.isSunday ? (
                           <span className="text-[10px] bg-amber-100 text-amber-800 font-bold px-1.5 py-0.5 rounded">
@@ -646,18 +712,24 @@ const AdminDashboard = () => {
                     type="number"
                     required
                     value={userFormData.baseSalary}
-                    onChange={(e) => setUserFormData({ ...userFormData, baseSalary: e.target.value })}
+                    onChange={(e) => {
+                      const newSalary = e.target.value;
+                      setUserFormData({
+                        ...userFormData,
+                        baseSalary: newSalary,
+                        overtimeRate: getDynamicHourlyRate(newSalary),
+                      });
+                    }}
                     className="w-full p-2 border rounded text-sm outline-none focus:ring-2 focus:ring-indigo-500"
                   />
                 </div>
                 <div>
-                  <label className="block text-xs font-semibold text-gray-600 mb-1">OT Rate (₹ / hr)</label>
+                  <label className="block text-xs font-semibold text-gray-600 mb-1">Calculated 1-Hour OT Rate</label>
                   <input
-                    type="number"
-                    required
-                    value={userFormData.overtimeRate}
-                    onChange={(e) => setUserFormData({ ...userFormData, overtimeRate: e.target.value })}
-                    className="w-full p-2 border rounded text-sm outline-none focus:ring-2 focus:ring-indigo-500"
+                    type="text"
+                    disabled
+                    value={`₹${getDynamicHourlyRate(userFormData.baseSalary)}/hr`}
+                    className="w-full p-2 border rounded text-sm bg-gray-100 text-indigo-700 font-bold cursor-not-allowed"
                   />
                 </div>
               </div>
