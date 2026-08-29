@@ -1,7 +1,7 @@
 const prisma = require('../config/db');
 const bcrypt = require('bcryptjs');
 
-// Get all employees for the admin management table
+// Get all employees for the admin management table and dropdown
 exports.getAllUsers = async (req, res) => {
   try {
     const users = await prisma.user.findMany({
@@ -13,11 +13,13 @@ exports.getAllUsers = async (req, res) => {
         baseSalary: true,
         overtimeRate: true,
         isActive: true,
+        adminRequestStatus: true,
         createdAt: true,
       },
       orderBy: { name: 'asc' },
     });
-    return res.status(200).json({ users });
+    // Return direct array for cleaner frontend mapping
+    return res.status(200).json(users);
   } catch (error) {
     return res.status(500).json({ message: 'Failed to fetch users', error: error.message });
   }
@@ -80,18 +82,36 @@ exports.deleteUser = async (req, res) => {
   }
 };
 
-// Holiday Management (Add/Get)
+// Holiday Management - Get all holidays
 exports.getHolidays = async (req, res) => {
   try {
     const holidays = await prisma.holiday.findMany({ orderBy: { date: 'asc' } });
-    return res.status(200).json({ holidays });
+    // Return direct array for calendar matching
+    return res.status(200).json(holidays);
   } catch (error) {
     return res.status(500).json({ message: 'Failed to fetch holidays', error: error.message });
   }
 };
+
+// Add a new festival/public holiday
+exports.addHoliday = async (req, res) => {
+  const { title, date } = req.body;
+  try {
+    const newHoliday = await prisma.holiday.create({
+      data: {
+        title,
+        date: new Date(date),
+      },
+    });
+    return res.status(201).json(newHoliday);
+  } catch (error) {
+    return res.status(500).json({ message: 'Failed to add holiday', error: error.message });
+  }
+};
+
 // Approve or Reject Admin Role Requests
 exports.reviewAdminRequest = async (req, res) => {
-  const { userId, approve } = req.body; // approve: boolean
+  const { userId, approve } = req.body;
 
   try {
     const updatedUser = await prisma.user.update({

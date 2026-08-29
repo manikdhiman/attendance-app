@@ -9,7 +9,13 @@ router.use(authenticateToken);
 // Employee actions
 router.post('/check-in', attendanceController.checkIn);
 router.post('/check-out', attendanceController.checkOut);
+
+// Overtime requests (Support both POST and PATCH, and both route paths)
 router.patch('/overtime/request', attendanceController.requestOvertime);
+router.post('/overtime/request', attendanceController.requestOvertime);
+router.patch('/overtime/claim', attendanceController.claimOvertime);
+router.post('/overtime/claim', attendanceController.claimOvertime);
+
 router.get('/records', attendanceController.getRecords);
 
 // Admin-only actions

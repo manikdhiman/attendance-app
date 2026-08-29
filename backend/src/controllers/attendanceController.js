@@ -72,23 +72,38 @@ exports.checkOut = async (req, res) => {
   }
 };
 
+// Handle Overtime Claim / Request
 exports.requestOvertime = async (req, res) => {
   const { attendanceId, overtimeHours } = req.body;
+
+  if (!attendanceId || overtimeHours === undefined) {
+    return res.status(400).json({ message: 'attendanceId and overtimeHours are required' });
+  }
+
+  const parsedHours = parseFloat(overtimeHours);
+  if (isNaN(parsedHours) || parsedHours <= 0) {
+    return res.status(400).json({ message: 'Overtime hours must be a positive number' });
+  }
 
   try {
     const attendance = await prisma.attendance.update({
       where: { id: attendanceId },
       data: {
-        overtimeHours: parseFloat(overtimeHours),
+        overtimeHours: parsedHours,
         overtimeStatus: 'PENDING',
       },
     });
 
-    return res.status(200).json({ message: 'Overtime request submitted', attendance });
+    return res.status(200).json({ message: 'Overtime request submitted for Admin review', attendance });
   } catch (error) {
+    console.error('Submit Overtime Error:', error);
     return res.status(500).json({ message: 'Failed to submit overtime', error: error.message });
   }
 };
+
+
+// Route alias for claimOvertime so router.patch('/overtime/claim') does not crash
+exports.claimOvertime = exports.requestOvertime;
 
 exports.reviewOvertime = async (req, res) => {
   const { attendanceId, status } = req.body;
