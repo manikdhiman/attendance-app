@@ -1,7 +1,8 @@
 import axios from 'axios';
 
+// Defaults directly to your live Render backend if env variable is missing
 const API = axios.create({
-  baseURL: import.meta.env.VITE_API_URL || 'http://localhost:5000/api',
+  baseURL: import.meta.env.VITE_API_URL || 'https://attendance-app-xzxf.onrender.com/api',
 });
 
 // Attach token interceptor if present
