@@ -4,28 +4,57 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
-// Your models below (User, Attendance, etc.)
+enum Role {
+  ADMIN
+  EMPLOYEE
+}
+
+enum RequestStatus {
+  NONE
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model User {
+  id                 String         @id @default(uuid())
+  name               String
+  email              String         @unique
+  password           String
+  role               Role           @default(EMPLOYEE)
+  adminRequestStatus RequestStatus  @default(NONE)
+  baseSalary         Float          @default(0)
+  overtimeRate       Float          @default(0)
+  isActive           Boolean        @default(true)
+  attendances        Attendance[]
+  createdAt          DateTime       @default(now())
+  updatedAt          DateTime       @updatedAt
+}
+
 model Attendance {
-  id              String    @id @default(uuid())
+  id              String         @id @default(uuid())
   userId          String
-  user            User      @relation(fields: [userId], references: [id])
-  date            DateTime
-  checkIn         DateTime?
-  checkOut        DateTime?
-  status          String    // PRESENT, ABSENT, HALF_DAY
+  user            User           @relation(fields: [userId], references: [id])
+  date            DateTime       @default(now())
+  inTime          DateTime?
+  outTime         DateTime?
+  workingHours    Float?
+  task            String?
+  assignedTask    String?
+  overtimeHours   Float          @default(0)
+  overtimeStatus  RequestStatus  @default(NONE)
   
-  // New Geo & Selfie fields
-  checkInPhoto    String?   // Base64 string or image URL
-  checkOutPhoto   String?
+  // Geofence & Live Camera Fields
+  checkInPhoto    String?        @db.Text
+  checkOutPhoto   String?        @db.Text
   checkInLat      Float?
   checkInLng      Float?
   checkOutLat     Float?
   checkOutLng     Float?
-  isWithinOffice  Boolean   @default(false)
+  isWithinOffice  Boolean        @default(false)
 
-  createdAt       DateTime  @default(now())
-  updatedAt       DateTime  @updatedAt
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
 }
