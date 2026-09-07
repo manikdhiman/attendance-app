@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import api from '../api/axios';
+import AttendanceCameraModal from '../components/AttendanceCameraModal';
 
 const EmployeeDashboard = () => {
   const [records, setRecords] = useState([]);
@@ -7,6 +8,10 @@ const EmployeeDashboard = () => {
   const [overtimeHours, setOvertimeHours] = useState('');
   const [selectedRecordId, setSelectedRecordId] = useState(null);
   const [msg, setMsg] = useState('');
+
+  // --- NEW: State for Live Camera & Location Modal ---
+  const [modalOpen, setModalOpen] = useState(false);
+  const [actionType, setActionType] = useState('checkIn'); // 'checkIn' or 'checkOut'
 
   const fetchRecords = async () => {
     try {
@@ -23,24 +28,39 @@ const EmployeeDashboard = () => {
 
   const activeRecord = records.find((r) => !r.outTime);
 
-  const handleCheckIn = async () => {
-    try {
-      await api.post('/attendance/check-in');
-      setMsg('Checked in successfully!');
-      fetchRecords();
-    } catch (err) {
-      setMsg(err.response?.data?.message || 'Check-in failed');
+  // --- NEW: Open modal instead of calling API immediately ---
+  const handleOpenAttendanceModal = (type) => {
+    if (type === 'checkOut' && !taskInput.trim()) {
+      setMsg('Please fill in what you worked on today before checking out.');
+      return;
     }
+    setActionType(type);
+    setModalOpen(true);
   };
 
-  const handleCheckOut = async () => {
+  // --- NEW: Executed after taking the live camera picture + GPS coordinates ---
+  const handleAttendanceSubmit = async ({ latitude, longitude, photo }) => {
     try {
-      await api.post('/attendance/check-out', { task: taskInput });
-      setMsg('Checked out successfully!');
-      setTaskInput('');
+      if (actionType === 'checkIn') {
+        const res = await api.post('/attendance/check-in', {
+          latitude,
+          longitude,
+          photo,
+        });
+        setMsg(res.data.message || 'Checked in successfully!');
+      } else {
+        const res = await api.post('/attendance/check-out', {
+          task: taskInput,
+          latitude,
+          longitude,
+          photo,
+        });
+        setMsg(res.data.message || 'Checked out successfully!');
+        setTaskInput('');
+      }
       fetchRecords();
     } catch (err) {
-      setMsg(err.response?.data?.message || 'Check-out failed');
+      setMsg(err.response?.data?.message || `${actionType === 'checkIn' ? 'Check-in' : 'Check-out'} failed`);
     }
   };
 
@@ -96,15 +116,15 @@ const EmployeeDashboard = () => {
           )}
           {!activeRecord ? (
             <button
-              onClick={handleCheckIn}
-              className="w-full sm:w-auto bg-green-600 hover:bg-green-700 text-white font-semibold px-6 py-2 rounded shadow"
+              onClick={() => handleOpenAttendanceModal('checkIn')}
+              className="w-full sm:w-auto bg-green-600 hover:bg-green-700 text-white font-semibold px-6 py-2 rounded shadow transition cursor-pointer"
             >
               Check In
             </button>
           ) : (
             <button
-              onClick={handleCheckOut}
-              className="w-full sm:w-auto bg-red-600 hover:bg-red-700 text-white font-semibold px-6 py-2 rounded shadow"
+              onClick={() => handleOpenAttendanceModal('checkOut')}
+              className="w-full sm:w-auto bg-red-600 hover:bg-red-700 text-white font-semibold px-6 py-2 rounded shadow transition cursor-pointer"
             >
               Check Out
             </button>
@@ -152,7 +172,7 @@ const EmployeeDashboard = () => {
                     {r.outTime && r.overtimeStatus === 'NONE' && (
                       <button
                         onClick={() => setSelectedRecordId(r.id)}
-                        className="text-xs bg-slate-800 text-white px-3 py-1 rounded hover:bg-slate-700"
+                        className="text-xs bg-slate-800 text-white px-3 py-1 rounded hover:bg-slate-700 transition"
                       >
                         Claim Overtime
                       </button>
@@ -167,7 +187,7 @@ const EmployeeDashboard = () => {
 
       {/* Overtime Claim Modal */}
       {selectedRecordId && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-40">
           <div className="bg-white p-6 rounded-lg shadow-lg w-full max-w-sm">
             <h4 className="text-lg font-bold mb-4">Claim Overtime Hours</h4>
             <form onSubmit={handleOvertimeSubmit} className="space-y-4">
@@ -184,11 +204,11 @@ const EmployeeDashboard = () => {
                 <button
                   type="button"
                   onClick={() => setSelectedRecordId(null)}
-                  className="px-4 py-2 text-sm bg-gray-200 rounded"
+                  className="px-4 py-2 text-sm bg-gray-200 rounded hover:bg-gray-300"
                 >
                   Cancel
                 </button>
-                <button type="submit" className="px-4 py-2 text-sm bg-indigo-600 text-white rounded">
+                <button type="submit" className="px-4 py-2 text-sm bg-indigo-600 text-white rounded hover:bg-indigo-700">
                   Submit
                 </button>
               </div>
@@ -196,6 +216,14 @@ const EmployeeDashboard = () => {
           </div>
         </div>
       )}
+
+      {/* --- NEW: Mandatory Live Camera & Location Verification Modal --- */}
+      <AttendanceCameraModal
+        isOpen={modalOpen}
+        actionType={actionType}
+        onClose={() => setModalOpen(false)}
+        onConfirm={handleAttendanceSubmit}
+      />
     </div>
   );
 };

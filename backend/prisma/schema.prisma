@@ -4,75 +4,28 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  schemas  = ["attendance_app"]
+  url      = env("DATABASE_URL")
 }
 
-enum Role {
-  ADMIN
-  EMPLOYEE
-
-  @@schema("attendance_app")
-}
-
-enum OvertimeStatus {
-  NONE
-  PENDING
-  APPROVED
-  REJECTED
-
-  @@schema("attendance_app")
-}
-
-enum AdminRequestStatus {
-  NONE
-  PENDING
-  APPROVED
-  REJECTED
-
-  @@schema("attendance_app")
-}
-
-model User {
-  id                 String             @id @default(uuid())
-  name               String
-  email              String             @unique
-  password           String
-  role               Role               @default(EMPLOYEE)
-  baseSalary         Float              @default(0.0)
-  overtimeRate       Float              @default(150.0)
-  isActive           Boolean            @default(true)
-  adminRequestStatus AdminRequestStatus @default(NONE)
-  createdAt          DateTime           @default(now())
-  updatedAt          DateTime           @updatedAt
-  attendances        Attendance[]
-
-  @@schema("attendance_app")
-}
-
+// Your models below (User, Attendance, etc.)
 model Attendance {
-  id             String         @id @default(uuid())
-  userId         String
-  user           User           @relation(fields: [userId], references: [id], onDelete: Cascade)
-  date           DateTime       @default(now())
-  inTime         DateTime       @default(now())
-  outTime        DateTime?
-  workingHours   Float?
-  task           String?
-  assignedTask   String?
-  overtimeHours  Float?         @default(0.0)
-  overtimeStatus OvertimeStatus @default(NONE)
-  createdAt      DateTime       @default(now())
-  updatedAt      DateTime       @updatedAt
+  id              String    @id @default(uuid())
+  userId          String
+  user            User      @relation(fields: [userId], references: [id])
+  date            DateTime
+  checkIn         DateTime?
+  checkOut        DateTime?
+  status          String    // PRESENT, ABSENT, HALF_DAY
+  
+  // New Geo & Selfie fields
+  checkInPhoto    String?   // Base64 string or image URL
+  checkOutPhoto   String?
+  checkInLat      Float?
+  checkInLng      Float?
+  checkOutLat     Float?
+  checkOutLng     Float?
+  isWithinOffice  Boolean   @default(false)
 
-  @@index([userId, date])
-  @@schema("attendance_app")
-}
-
-model Holiday {
-  id        String   @id @default(uuid())
-  title     String
-  date      DateTime @unique
-  createdAt DateTime @default(now())
-
-  @@schema("attendance_app")
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
 }
