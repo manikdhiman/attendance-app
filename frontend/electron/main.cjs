@@ -1,5 +1,5 @@
 const { app, BrowserWindow } = require('electron');
-const path = require('path');
+const path = require('node:path');
 
 function createWindow() {
   const win = new BrowserWindow({
@@ -11,15 +11,14 @@ function createWindow() {
     icon: path.join(__dirname, '../public/icon.ico'),
     webPreferences: {
       nodeIntegration: false,
-      contextIsolation: true
+      contextIsolation: true,
     },
-    icon: path.join(__dirname, '../public/vite.svg')
   });
 
-  // Load the live production website directly
+  // Load production web app
   win.loadURL('https://attendance-app-phi-three.vercel.app');
 
-  // Remove default menu bar for clean native app appearance
+  // Hide default menu bar
   win.setMenuBarVisibility(false);
 }
 
@@ -32,5 +31,7 @@ app.whenReady().then(() => {
 });
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
+  if (process.platform !== 'darwin') {
+    app.quit();
+  }
 });
