@@ -7,25 +7,29 @@ export default defineConfig({
     react(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'vite.svg'],
+      includeAssets: ['favicon.ico', 'apple-touch-icon.png', 'masked-icon.svg'],
       manifest: {
-        name: 'Attendance & Payroll Portal',
-        short_name: 'AttendanceApp',
-        description: 'Office Attendance, Shift Tracking, and Payroll System',
+        name: 'WorkTrack Attendance',
+        short_name: 'WorkTrack',
+        description: 'Employee Attendance & Shift Management App',
         theme_color: '#4f46e5',
         background_color: '#ffffff',
         display: 'standalone',
-        orientation: 'portrait',
+        scope: '/',
         start_url: '/',
         icons: [
           {
-            src: '/vite.svg',
-            sizes: '192x192 512x512',
-            type: 'image/svg+xml',
-            purpose: 'any maskable',
+            src: '/pwa-192x192.png',
+            sizes: '192x192',
+            type: 'image/png'
           },
-        ],
-      },
-    }),
-  ],
+          {
+            src: '/pwa-512x512.png',
+            sizes: '512x512',
+            type: 'image/png'
+          }
+        ]
+      }
+    })
+  ]
 });
