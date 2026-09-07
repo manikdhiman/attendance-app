@@ -21,19 +21,35 @@ const AttendanceCameraModal = ({ isOpen, onClose, onConfirm, actionType }) => {
     }
 
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        setLocation({
-          latitude: pos.coords.latitude,
-          longitude: pos.coords.longitude,
-          accuracy: pos.coords.accuracy,
-        });
-      },
-      (err) => {
-        setLocError('Location is OFF or permission denied. Please turn ON location/GPS on your device.');
-      },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 }
-    );
-
+  (pos) => {
+    setLocation({
+      latitude: pos.coords.latitude,
+      longitude: pos.coords.longitude,
+      accuracy: pos.coords.accuracy,
+    });
+  },
+  (err) => {
+    // If high accuracy fails on desktop/laptop, try normal accuracy
+    if (err.code === err.TIMEOUT || err.code === err.POSITION_UNAVAILABLE) {
+      navigator.geolocation.getCurrentPosition(
+        (fallbackPos) => {
+          setLocation({
+            latitude: fallbackPos.coords.latitude,
+            longitude: fallbackPos.coords.longitude,
+            accuracy: fallbackPos.coords.accuracy,
+          });
+        },
+        () => {
+          setLocError('Location is OFF or unavailable. Please enable device location.');
+        },
+        { enableHighAccuracy: false, timeout: 15000, maximumAge: 60000 }
+      );
+    } else {
+      setLocError('Location permission denied. Click the site settings icon in your browser address bar and Allow Location.');
+    }
+  },
+  { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
+);
     // 2. Open Live Camera Stream (Strictly front camera, no gallery pickers)
     navigator.mediaDevices
       .getUserMedia({ video: { facingMode: 'user' }, audio: false })
