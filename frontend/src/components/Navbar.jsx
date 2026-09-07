@@ -13,7 +13,7 @@ const Navbar = () => {
   return (
     <nav className="bg-slate-900 text-white px-6 py-4 flex justify-between items-center shadow-md">
       <div className="flex items-center space-x-6">
-        <span className="text-xl font-bold text-indigo-400">WorkTrack</span>
+        <span className="text-xl font-bold text-indigo-400">CSsphere</span>
         {user && (
           <>
             <Link to="/" className="hover:text-indigo-300">Dashboard</Link>
