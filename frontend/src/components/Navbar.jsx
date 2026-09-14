@@ -5,7 +5,7 @@ import { useAuth } from '../context/AuthContext';
 const Navbar = () => {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
-  const [isOpen, setIsOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   const handleLogout = () => {
     logout();
@@ -13,34 +13,39 @@ const Navbar = () => {
   };
 
   return (
-    <nav className="bg-slate-900 text-white shadow-md">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+    <header className="bg-slate-900 border-b border-slate-800 sticky top-0 z-50">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6">
         <div className="flex items-center justify-between h-16">
           
           {/* Logo */}
-          <div className="flex items-center gap-2">
-            <Link to="/" className="text-xl font-bold tracking-tight text-indigo-400 hover:text-indigo-300 transition">
-              CSsphere
-            </Link>
-          </div>
+          <Link 
+            to="/" 
+            className="text-xl font-black tracking-tight text-white flex items-center gap-2"
+          >
+            <span className="text-indigo-400">CS</span>sphere
+          </Link>
 
-          {/* Desktop Nav Items */}
+          {/* Desktop Navigation */}
           {user && (
-            <div className="hidden md:flex items-center space-x-4">
-              <Link to="/" className="text-sm hover:text-indigo-300 transition">
+            <div className="hidden md:flex items-center space-x-6">
+              <Link 
+                to="/" 
+                className="text-sm font-medium text-slate-300 hover:text-white transition"
+              >
                 Dashboard
               </Link>
-              <Link to="/policies" className="text-sm hover:text-indigo-300 transition">
+              <Link 
+                to="/policies" 
+                className="text-sm font-medium text-slate-300 hover:text-white transition"
+              >
                 Rules & Policies
               </Link>
-              
-              <span className="bg-slate-800 text-xs px-3 py-1.5 rounded-full border border-slate-700 text-slate-200">
+              <span className="bg-slate-800 text-slate-200 text-xs font-semibold px-3 py-1.5 rounded-full border border-slate-700">
                 {user.name} ({user.role})
               </span>
-
               <button
                 onClick={handleLogout}
-                className="bg-red-600 hover:bg-red-700 text-white text-xs font-semibold px-3 py-1.5 rounded-lg transition"
+                className="bg-red-600 hover:bg-red-700 text-white text-xs font-semibold px-4 py-2 rounded-lg transition"
               >
                 Logout
               </button>
@@ -49,59 +54,68 @@ const Navbar = () => {
 
           {/* Mobile Hamburger Button */}
           {user && (
-            <div className="flex md:hidden">
+            <div className="flex md:hidden items-center gap-2">
               <button
-                onClick={() => setIsOpen(!isOpen)}
-                type="button"
-                className="text-slate-300 hover:text-white p-2 rounded-md focus:outline-none"
+                onClick={() => setMobileMenuOpen(!mobileMenuOpen)}
+                className="p-2 rounded-lg bg-slate-800 text-slate-300 hover:text-white focus:outline-none"
+                aria-label="Toggle Navigation Menu"
               >
-                <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  {isOpen ? (
+                {mobileMenuOpen ? (
+                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
-                  ) : (
+                  </svg>
+                ) : (
+                  <svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 6h16M4 12h16M4 18h16" />
-                  )}
-                </svg>
+                  </svg>
+                )}
               </button>
             </div>
           )}
         </div>
       </div>
 
-      {/* Mobile Collapsed Menu */}
-      {user && isOpen && (
-        <div className="md:hidden px-4 pt-2 pb-4 space-y-3 bg-slate-950 border-t border-slate-800">
-          <div className="text-xs text-slate-400 pb-1 border-b border-slate-800">
-            Signed in as <span className="font-semibold text-slate-200">{user.name} ({user.role})</span>
+      {/* Mobile Drawer */}
+      {user && mobileMenuOpen && (
+        <div className="md:hidden bg-slate-950 border-t border-slate-800 px-4 py-4 space-y-3">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-800">
+            <div>
+              <p className="text-xs text-slate-400">Signed in as</p>
+              <p className="text-sm font-bold text-slate-100">{user.name}</p>
+            </div>
+            <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-indigo-900 text-indigo-200 border border-indigo-700">
+              {user.role}
+            </span>
           </div>
-          <div className="flex flex-col gap-2">
+
+          <div className="flex flex-col space-y-2 pt-1">
             <Link
               to="/"
-              onClick={() => setIsOpen(false)}
-              className="text-sm py-1.5 text-slate-200 hover:text-indigo-400"
+              onClick={() => setMobileMenuOpen(false)}
+              className="px-3 py-2 rounded-md text-sm font-medium text-slate-200 hover:bg-slate-800 hover:text-white transition"
             >
-              Dashboard
+              📊 Dashboard
             </Link>
             <Link
               to="/policies"
-              onClick={() => setIsOpen(false)}
-              className="text-sm py-1.5 text-slate-200 hover:text-indigo-400"
+              onClick={() => setMobileMenuOpen(false)}
+              className="px-3 py-2 rounded-md text-sm font-medium text-slate-200 hover:bg-slate-800 hover:text-white transition"
             >
-              Rules & Policies
+              📋 Rules & Policies
             </Link>
             <button
               onClick={() => {
-                setIsOpen(false);
+                setMobileMenuOpen(false);
                 handleLogout();
               }}
-              className="w-full text-left text-sm py-2 text-red-400 font-semibold hover:text-red-300"
+              className="w-full text-left px-3 py-2 rounded-md text-sm font-semibold text-red-400 hover:bg-red-500/10 transition"
             >
-              Logout
+              🚪 Logout
             </button>
           </div>
         </div>
       )}
-    </nav>
+    </header>
   );
 };
 
