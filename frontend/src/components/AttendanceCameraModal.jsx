@@ -1,190 +1,158 @@
-import React, { useRef, useState, useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import * as faceapi from '@vladmandic/face-api';
 
-const AttendanceCameraModal = ({ isOpen, onClose, onConfirm, actionType }) => {
+const AttendanceCameraModal = ({ isOpen, actionType, onClose, onConfirm }) => {
   const videoRef = useRef(null);
   const [stream, setStream] = useState(null);
-  const [photo, setPhoto] = useState(null);
-  const [location, setLocation] = useState(null);
-  const [locError, setLocError] = useState('');
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [statusText, setStatusText] = useState('Initializing camera and AI models...');
+  const [capturing, setCapturing] = useState(false);
 
-  // 1. Request GPS Location immediately on open
   useEffect(() => {
     if (!isOpen) return;
 
-    setLocError('');
-    setPhoto(null);
+    let activeStream = null;
 
-    if (!navigator.geolocation) {
-      setLocError('Geolocation is not supported by your browser.');
-      return;
-    }
+    const init = async () => {
+      try {
+        setLoading(true);
+        setStatusText('Loading neural face models...');
 
-    navigator.geolocation.getCurrentPosition(
-  (pos) => {
-    setLocation({
-      latitude: pos.coords.latitude,
-      longitude: pos.coords.longitude,
-      accuracy: pos.coords.accuracy,
-    });
-  },
-  (err) => {
-    // If high accuracy fails on desktop/laptop, try normal accuracy
-    if (err.code === err.TIMEOUT || err.code === err.POSITION_UNAVAILABLE) {
-      navigator.geolocation.getCurrentPosition(
-        (fallbackPos) => {
-          setLocation({
-            latitude: fallbackPos.coords.latitude,
-            longitude: fallbackPos.coords.longitude,
-            accuracy: fallbackPos.coords.accuracy,
-          });
-        },
-        () => {
-          setLocError('Location is OFF or unavailable. Please enable device location.');
-        },
-        { enableHighAccuracy: false, timeout: 15000, maximumAge: 60000 }
-      );
-    } else {
-      setLocError('Location permission denied. Click the site settings icon in your browser address bar and Allow Location.');
-    }
-  },
-  { enableHighAccuracy: true, timeout: 8000, maximumAge: 0 }
-);
-    // 2. Open Live Camera Stream (Strictly front camera, no gallery pickers)
-    navigator.mediaDevices
-      .getUserMedia({ video: { facingMode: 'user' }, audio: false })
-      .then((mediaStream) => {
-        setStream(mediaStream);
+        // Load models directly from Vite public directory
+        await Promise.all([
+          faceapi.nets.ssdMobilenetv1.loadFromUri('/models'),
+          faceapi.nets.faceLandmark68Net.loadFromUri('/models'),
+          faceapi.nets.faceRecognitionNet.loadFromUri('/models'),
+        ]);
+
+        setStatusText('Accessing camera...');
+        activeStream = await navigator.mediaDevices.getUserMedia({
+          video: { width: 640, height: 480, facingMode: 'user' },
+        });
+
         if (videoRef.current) {
-          videoRef.current.srcObject = mediaStream;
+          videoRef.current.srcObject = activeStream;
+          videoRef.current.play();
         }
-      })
-      .catch(() => {
-        setLocError('Camera access denied. Camera permission is required for live photo verification.');
-      });
+
+        setStream(activeStream);
+        setLoading(false);
+        setStatusText('Look directly into the camera to verify.');
+      } catch (err) {
+        setStatusText('Camera or model error: ' + err.message);
+        setLoading(false);
+      }
+    };
+
+    init();
 
     return () => {
-      if (stream) {
-        stream.getTracks().forEach((track) => track.stop());
-      }
+      if (activeStream) activeStream.getTracks().forEach((t) => t.stop());
     };
   }, [isOpen]);
 
-  const capturePhoto = () => {
-    if (!videoRef.current) return;
-    const video = videoRef.current;
-    const canvas = document.createElement('canvas');
-    canvas.width = video.videoWidth || 640;
-    canvas.height = video.videoHeight || 480;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const dataUrl = canvas.toDataURL('image/jpeg', 0.8);
-    setPhoto(dataUrl);
-  };
+  const handleCaptureAndVerify = async () => {
+    if (!videoRef.current || capturing) return;
+    setCapturing(true);
+    setStatusText('Detecting face & extracting biometric features...');
 
-  const handleRetake = () => {
-    setPhoto(null);
-  };
+    try {
+      // 1. Detect single face + 68 landmarks + 128-d vector
+      const detection = await faceapi
+        .detectSingleFace(videoRef.current)
+        .withFaceLandmarks()
+        .withFaceDescriptor();
 
-  const handleSubmit = async () => {
-    if (!location) {
-      alert('Location is not captured yet. Please enable GPS.');
-      return;
+      if (!detection) {
+        setStatusText('⚠️ No face detected! Please look straight at the camera with clear lighting.');
+        setCapturing(false);
+        return;
+      }
+
+      // Convert Float32Array to standard array for JSON transport
+      const liveDescriptor = Array.from(detection.descriptor);
+
+      // 2. Capture a photo snapshot (base64)
+      const canvasEl = document.createElement('canvas');
+      canvasEl.width = videoRef.current.videoWidth || 640;
+      canvasEl.height = videoRef.current.videoHeight || 480;
+      const ctx = canvasEl.getContext('2d');
+      ctx.drawImage(videoRef.current, 0, 0, canvasEl.width, canvasEl.height);
+      const photoBase64 = canvasEl.toDataURL('image/jpeg', 0.8);
+
+      // 3. Get GPS location
+      setStatusText('Acquiring location...');
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          setStatusText('Submitting biometric record...');
+          onConfirm({
+            latitude: pos.coords.latitude,
+            longitude: pos.coords.longitude,
+            photo: photoBase64,
+            faceDescriptor: liveDescriptor, // Sent to backend for Euclidean check
+          });
+          setCapturing(false);
+          onClose();
+        },
+        () => {
+          // If GPS denied/fails, still forward biometrics
+          setStatusText('Submitting biometric record...');
+          onConfirm({
+            latitude: null,
+            longitude: null,
+            photo: photoBase64,
+            faceDescriptor: liveDescriptor,
+          });
+          setCapturing(false);
+          onClose();
+        },
+        { enableHighAccuracy: true, timeout: 10000 }
+      );
+    } catch (err) {
+      setStatusText('Verification capture failed: ' + err.message);
+      setCapturing(false);
     }
-    if (!photo) {
-      alert('Please click your photo first.');
-      return;
-    }
-
-    setLoading(true);
-    await onConfirm({
-      latitude: location.latitude,
-      longitude: location.longitude,
-      photo,
-    });
-    setLoading(false);
-    handleClose();
-  };
-
-  const handleClose = () => {
-    if (stream) {
-      stream.getTracks().forEach((track) => track.stop());
-    }
-    onClose();
   };
 
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-70 p-4">
-      <div className="bg-white rounded-2xl p-6 w-full max-w-md shadow-2xl flex flex-col items-center">
-        <h3 className="text-lg font-bold text-gray-800 mb-2">
-          Live Verification ({actionType === 'checkIn' ? 'Check In' : 'Check Out'})
-        </h3>
-
-        {/* GPS Location Banner */}
-        {locError ? (
-          <div className="w-full bg-red-100 border border-red-300 text-red-700 text-xs p-3 rounded-lg mb-3">
-            ⚠️ {locError}
-          </div>
-        ) : location ? (
-          <div className="w-full bg-emerald-50 border border-emerald-300 text-emerald-700 text-xs p-2 rounded-lg mb-3 flex justify-between">
-            <span>📍 GPS Location Acquired</span>
-            <span className="font-semibold">(±{Math.round(location.accuracy)}m)</span>
-          </div>
-        ) : (
-          <div className="w-full bg-blue-50 border border-blue-200 text-blue-700 text-xs p-2 rounded-lg mb-3 animate-pulse">
-            🛰️ Fetching exact GPS location...
-          </div>
-        )}
-
-        {/* Live Camera View or Captured Photo */}
-        <div className="relative w-full aspect-[4/3] bg-black rounded-xl overflow-hidden mb-4 border border-gray-200 flex items-center justify-center">
-          {!photo ? (
-            <video
-              ref={videoRef}
-              autoPlay
-              playsInline
-              muted
-              className="w-full h-full object-cover"
-            />
-          ) : (
-            <img src={photo} alt="Captured preview" className="w-full h-full object-cover" />
-          )}
+    <div className="fixed inset-0 bg-black/60 backdrop-blur-xs flex items-center justify-center p-4 z-50">
+      <div className="bg-white rounded-2xl p-5 max-w-sm w-full shadow-2xl space-y-4 text-center">
+        <div>
+          <h3 className="text-lg font-bold text-gray-800">
+            {actionType === 'checkIn' ? 'Check-In Verification' : 'Check-Out Verification'}
+          </h3>
+          <p className="text-xs text-gray-500 mt-0.5">Biometric facial recognition required</p>
         </div>
 
-        {/* Actions */}
-        <div className="flex w-full gap-3">
-          {!photo ? (
-            <button
-              onClick={capturePhoto}
-              disabled={!location || !!locError}
-              className="flex-1 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold py-2.5 rounded-xl transition"
-            >
-              📸 Capture Live Photo
-            </button>
-          ) : (
-            <>
-              <button
-                onClick={handleRetake}
-                className="flex-1 bg-gray-200 hover:bg-gray-300 text-gray-700 font-bold py-2.5 rounded-xl transition"
-              >
-                Retake
-              </button>
-              <button
-                onClick={handleSubmit}
-                disabled={loading || !location}
-                className="flex-1 bg-emerald-600 hover:bg-emerald-700 disabled:opacity-50 text-white font-bold py-2.5 rounded-xl transition"
-              >
-                {loading ? 'Submitting...' : 'Confirm & Mark'}
-              </button>
-            </>
-          )}
+        <div className="relative mx-auto w-[240px] h-[240px] rounded-full overflow-hidden border-4 border-indigo-600 shadow-inner bg-black flex items-center justify-center">
+          <video
+            ref={videoRef}
+            playsInline
+            muted
+            className="w-full h-full object-cover scale-x-[-1]"
+          />
+        </div>
+
+        <p className="text-xs font-semibold text-slate-700 min-h-[32px] px-2 flex items-center justify-center">
+          {statusText}
+        </p>
+
+        <div className="flex gap-2 justify-center pt-2">
           <button
-            onClick={handleClose}
-            className="px-4 py-2.5 bg-gray-100 hover:bg-gray-200 text-gray-600 rounded-xl font-medium"
+            onClick={onClose}
+            disabled={capturing}
+            className="px-4 py-2 text-xs font-semibold text-gray-600 bg-gray-100 hover:bg-gray-200 rounded-lg cursor-pointer transition"
           >
             Cancel
+          </button>
+          <button
+            onClick={handleCaptureAndVerify}
+            disabled={loading || capturing}
+            className="px-5 py-2 text-xs font-semibold text-white bg-indigo-600 hover:bg-indigo-700 disabled:bg-gray-400 rounded-lg shadow cursor-pointer transition"
+          >
+            {capturing ? 'Verifying...' : 'Capture & Verify'}
           </button>
         </div>
       </div>

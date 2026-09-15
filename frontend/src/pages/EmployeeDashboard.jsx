@@ -37,31 +37,32 @@ const EmployeeDashboard = () => {
     setModalOpen(true);
   };
 
-  const handleAttendanceSubmit = async ({ latitude, longitude, photo }) => {
-    try {
-      if (actionType === 'checkIn') {
-        const res = await api.post('/attendance/check-in', {
-          latitude,
-          longitude,
-          photo,
-        });
-        setMsg(res.data.message || 'Checked in successfully!');
-      } else {
-        const res = await api.post('/attendance/check-out', {
-          task: taskInput,
-          latitude,
-          longitude,
-          photo,
-        });
-        setMsg(res.data.message || 'Checked out successfully!');
-        setTaskInput('');
-      }
-      fetchRecords();
-    } catch (err) {
-      setMsg(err.response?.data?.message || `${actionType === 'checkIn' ? 'Check-in' : 'Check-out'} failed`);
+  const handleAttendanceSubmit = async ({ latitude, longitude, photo, faceDescriptor }) => {
+  try {
+    if (actionType === 'checkIn') {
+      const res = await api.post('/attendance/check-in', {
+        latitude,
+        longitude,
+        photo,
+        faceDescriptor, // Sent to backend for verification
+      });
+      setMsg(res.data.message || 'Checked in successfully!');
+    } else {
+      const res = await api.post('/attendance/check-out', {
+        task: taskInput,
+        latitude,
+        longitude,
+        photo,
+        faceDescriptor, // Sent to backend for verification
+      });
+      setMsg(res.data.message || 'Checked out successfully!');
+      setTaskInput('');
     }
-  };
-
+    fetchRecords();
+  } catch (err) {
+    setMsg(err.response?.data?.message || `${actionType === 'checkIn' ? 'Check-in' : 'Check-out'} failed`);
+  }
+};
   const handleOvertimeSubmit = async (e) => {
     e.preventDefault();
     try {
