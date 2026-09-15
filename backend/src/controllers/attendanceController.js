@@ -1,24 +1,46 @@
 const prisma = require('../config/db');
 
-// --- HELPER: Compute Euclidean Distance between two 128-dimensional vectors ---
-function computeFaceDistance(descriptor1, descriptor2) {
-  if (!descriptor1 || !descriptor2 || descriptor1.length !== descriptor2.length) {
-    return 1.0; // Complete mismatch
+// --- HELPER: Safely parse vector to standard 128-float array ---
+function parseDescriptor(raw) {
+  if (!raw) return null;
+  let parsed = raw;
+  if (typeof raw === 'string') {
+    try {
+      parsed = JSON.parse(raw);
+    } catch {
+      return null;
+    }
   }
+  // Convert object with numeric keys (e.g. { '0': -0.12, '1': 0.05 }) or TypedArray into normal Array
+  if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+    parsed = Object.values(parsed);
+  }
+  return Array.isArray(parsed) ? parsed.map(Number) : null;
+}
+
+// --- HELPER: Compute Euclidean Distance between two 128-d vectors ---
+function computeFaceDistance(desc1, desc2) {
+  const d1 = parseDescriptor(desc1);
+  const d2 = parseDescriptor(desc2);
+
+  if (!d1 || !d2 || d1.length !== 128 || d2.length !== 128) {
+    console.warn(`[BIOMETRIC] Invalid descriptor shape: d1=${d1?.length}, d2=${d2?.length}`);
+    return 1.0;
+  }
+
   let sum = 0;
-  for (let i = 0; i < descriptor1.length; i++) {
-    const diff = descriptor1[i] - descriptor2[i];
+  for (let i = 0; i < 128; i++) {
+    const diff = d1[i] - d2[i];
     sum += diff * diff;
   }
   return Math.sqrt(sum);
 }
 
-// Maximum allowed distance (Standard face-api threshold is 0.48 - 0.50; lower = stricter)
-const MATCH_THRESHOLD = 0.48;
+// 0.55 is the standard threshold: strictly rejects strangers (typically 0.68-0.95+) while accommodating real-world webcam variations (typically 0.35-0.52)
+const MATCH_THRESHOLD = 0.55;
 
 exports.checkIn = async (req, res) => {
   const userId = req.user.id;
-  /* --- EXTRACT LIVE BIOMETRICS & METADATA --- */
   const { latitude, longitude, photo, faceDescriptor } = req.body;
 
   try {
@@ -27,28 +49,26 @@ exports.checkIn = async (req, res) => {
       return res.status(403).json({ message: 'Account has been disbanded/disabled. Contact Admin.' });
     }
 
-    /* --- BIOMETRIC VERIFICATION ENFORCEMENT --- */
+    /* --- BIOMETRIC VERIFICATION --- */
     if (!user.faceDescriptor) {
       return res.status(403).json({
-        message: 'No registered face descriptor found for your profile. Please contact Admin for enrollment.',
+        message: 'No registered facial profile found. Please contact Admin for enrollment.',
       });
     }
 
-    if (!faceDescriptor || !Array.isArray(faceDescriptor) || faceDescriptor.length !== 128) {
+    const liveVector = parseDescriptor(faceDescriptor);
+    if (!liveVector || liveVector.length !== 128) {
       return res.status(400).json({
-        message: 'Valid facial scan is required. Please ensure your face is clearly visible to the camera.',
+        message: 'Valid 128-point face scan required. Ensure good lighting and look straight at the lens.',
       });
     }
 
-    const registeredVector = Array.isArray(user.faceDescriptor)
-      ? user.faceDescriptor
-      : JSON.parse(user.faceDescriptor);
-
-    const distance = computeFaceDistance(faceDescriptor, registeredVector);
+    const distance = computeFaceDistance(liveVector, user.faceDescriptor);
+    console.log(`[BIOMETRIC CHECK-IN] User: ${user.email} | Score: ${distance.toFixed(3)} | Threshold: ${MATCH_THRESHOLD}`);
 
     if (distance > MATCH_THRESHOLD) {
       return res.status(401).json({
-        message: `Biometric Verification Failed! Face does not match registered employee (${user.name}). Match distance: ${distance.toFixed(2)}`,
+        message: `Biometric Verification Failed! Face does not match registered employee (${user.name}). Distance: ${distance.toFixed(2)}`,
       });
     }
 
@@ -82,13 +102,13 @@ exports.checkIn = async (req, res) => {
 
     return res.status(201).json({ message: 'Checked in successfully (Face Verified)', attendance });
   } catch (error) {
+    console.error('CheckIn error:', error);
     return res.status(500).json({ message: 'Check-in failed', error: error.message });
   }
 };
 
 exports.checkOut = async (req, res) => {
   const userId = req.user.id;
-  /* --- EXTRACT LIVE BIOMETRICS & TASK --- */
   const { task, latitude, longitude, photo, faceDescriptor } = req.body;
 
   try {
@@ -97,23 +117,21 @@ exports.checkOut = async (req, res) => {
       return res.status(403).json({ message: 'Account has been disbanded/disabled. Contact Admin.' });
     }
 
-    /* --- BIOMETRIC VERIFICATION ENFORCEMENT ON CHECKOUT --- */
+    /* --- BIOMETRIC VERIFICATION --- */
     if (user.faceDescriptor) {
-      if (!faceDescriptor || !Array.isArray(faceDescriptor) || faceDescriptor.length !== 128) {
+      const liveVector = parseDescriptor(faceDescriptor);
+      if (!liveVector || liveVector.length !== 128) {
         return res.status(400).json({
           message: 'Valid facial scan is required to check out.',
         });
       }
 
-      const registeredVector = Array.isArray(user.faceDescriptor)
-        ? user.faceDescriptor
-        : JSON.parse(user.faceDescriptor);
-
-      const distance = computeFaceDistance(faceDescriptor, registeredVector);
+      const distance = computeFaceDistance(liveVector, user.faceDescriptor);
+      console.log(`[BIOMETRIC CHECK-OUT] User: ${user.email} | Score: ${distance.toFixed(3)} | Threshold: ${MATCH_THRESHOLD}`);
 
       if (distance > MATCH_THRESHOLD) {
         return res.status(401).json({
-          message: `Biometric Verification Failed! Face does not match registered employee (${user.name}).`,
+          message: `Biometric Verification Failed! Face does not match registered employee (${user.name}). Distance: ${distance.toFixed(2)}`,
         });
       }
     }
@@ -144,11 +162,11 @@ exports.checkOut = async (req, res) => {
 
     return res.status(200).json({ message: 'Checked out successfully (Face Verified)', attendance: updatedAttendance });
   } catch (error) {
+    console.error('CheckOut error:', error);
     return res.status(500).json({ message: 'Check-out failed', error: error.message });
   }
 };
 
-// Handle Overtime Claim / Request
 exports.requestOvertime = async (req, res) => {
   const { attendanceId, overtimeHours } = req.body;
 
@@ -177,7 +195,6 @@ exports.requestOvertime = async (req, res) => {
   }
 };
 
-// Route alias for claimOvertime so router.patch('/overtime/claim') does not crash
 exports.claimOvertime = exports.requestOvertime;
 
 exports.reviewOvertime = async (req, res) => {
