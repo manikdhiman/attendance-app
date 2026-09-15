@@ -1,6 +1,7 @@
 {
   "name": "backend",
   "version": "1.0.0",
+  "type": "module",
   "main": "src/index.js",
   "scripts": {
     "dev": "nodemon src/index.js",
@@ -13,10 +14,14 @@
   "dependencies": {
     "@prisma/adapter-pg": "^7.9.1",
     "@prisma/client": "^7.10.0",
+    "@tensorflow/tfjs": "^4.22.0",
+    "@vladmandic/face-api": "^1.7.15",
     "bcryptjs": "^3.0.3",
+    "canvas": "^3.2.3",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
+    "face-api.js": "^0.22.2",
     "jsonwebtoken": "^9.0.3",
     "pg": "^8.23.0"
   },
