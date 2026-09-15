@@ -36,7 +36,7 @@ function computeFaceDistance(desc1, desc2) {
   return Math.sqrt(sum);
 }
 
-// 0.55 is the standard threshold: strictly rejects strangers (typically 0.68-0.95+) while accommodating real-world webcam variations (typically 0.35-0.52)
+// 0.55 is standard threshold for mobile/webcam face-api matching
 const MATCH_THRESHOLD = 0.55;
 
 exports.checkIn = async (req, res) => {
@@ -89,14 +89,15 @@ exports.checkIn = async (req, res) => {
       });
     }
 
+    // Mapped correctly to schema fields: checkInLat, checkInLng, checkInPhoto
     const attendance = await prisma.attendance.create({
       data: {
         userId,
         date: now,
         inTime: now,
-        latitude: latitude ? String(latitude) : null,
-        longitude: longitude ? String(longitude) : null,
-        photo: photo || null,
+        checkInLat: latitude ? parseFloat(latitude) : null,
+        checkInLng: longitude ? parseFloat(longitude) : null,
+        checkInPhoto: photo || null,
       },
     });
 
@@ -148,15 +149,16 @@ exports.checkOut = async (req, res) => {
     const outTime = new Date();
     const workingHours = parseFloat(((outTime - new Date(activeShift.inTime)) / (1000 * 60 * 60)).toFixed(2));
 
+    // Mapped correctly to schema fields: checkOutLat, checkOutLng, checkOutPhoto
     const updatedAttendance = await prisma.attendance.update({
       where: { id: activeShift.id },
       data: {
         outTime,
         workingHours,
         task: task || activeShift.task,
-        latitude: latitude ? String(latitude) : activeShift.latitude,
-        longitude: longitude ? String(longitude) : activeShift.longitude,
-        photo: photo || activeShift.photo,
+        checkOutLat: latitude ? parseFloat(latitude) : activeShift.checkOutLat,
+        checkOutLng: longitude ? parseFloat(longitude) : activeShift.checkOutLng,
+        checkOutPhoto: photo || activeShift.checkOutPhoto,
       },
     });
 
