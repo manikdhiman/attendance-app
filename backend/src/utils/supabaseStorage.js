@@ -1,9 +1,21 @@
 const { createClient } = require('@supabase/supabase-js');
 
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+let supabase = null;
 
-const supabase = createClient(supabaseUrl, supabaseKey);
+function getSupabaseClient() {
+  if (supabase) return supabase;
+
+  const supabaseUrl = process.env.SUPABASE_URL;
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY || process.env.SUPABASE_ANON_KEY;
+
+  if (!supabaseUrl || !supabaseKey) {
+    console.warn('[STORAGE] SUPABASE_URL or SUPABASE_ANON_KEY missing. Photo uploads to cloud storage will be skipped.');
+    return null;
+  }
+
+  supabase = createClient(supabaseUrl, supabaseKey);
+  return supabase;
+}
 
 /**
  * Uploads a base64 image data string directly to Supabase Storage
@@ -11,6 +23,12 @@ const supabase = createClient(supabaseUrl, supabaseKey);
  */
 async function uploadAttendancePhoto(base64Data, userId, type = 'checkin') {
   if (!base64Data || !base64Data.startsWith('data:image')) {
+    return null;
+  }
+
+  const client = getSupabaseClient();
+  // Fallback: If Supabase credentials are not configured, return null or fallback gracefully
+  if (!client) {
     return null;
   }
 
@@ -22,7 +40,7 @@ async function uploadAttendancePhoto(base64Data, userId, type = 'checkin') {
     const buffer = Buffer.from(matches[2], 'base64');
     const fileName = `${userId}/${type}_${Date.now()}.${extension}`;
 
-    const { data, error } = await supabase.storage
+    const { error } = await client.storage
       .from('attendance-photos')
       .upload(fileName, buffer, {
         contentType: `image/${extension}`,
@@ -34,7 +52,7 @@ async function uploadAttendancePhoto(base64Data, userId, type = 'checkin') {
       return null;
     }
 
-    const { data: publicUrlData } = supabase.storage
+    const { data: publicUrlData } = client.storage
       .from('attendance-photos')
       .getPublicUrl(fileName);
 
