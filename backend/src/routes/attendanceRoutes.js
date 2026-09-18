@@ -18,6 +18,7 @@ router.post('/overtime/claim', attendanceController.claimOvertime);
 router.post('/register-face', attendanceController.registerSelfFace);
 
 router.get('/records', attendanceController.getRecords);
+router.get('/biometric-status', attendanceController.getBiometricStatus);
 
 // Admin-only actions
 router.patch('/admin/overtime/review', authorizeRoles('ADMIN'), attendanceController.reviewOvertime);
