@@ -11,5 +11,7 @@ router.patch('/users/:id/ban', adminController.toggleBanUser);
 router.delete('/users/:id', adminController.deleteUser);
 router.get('/holidays', adminController.getHolidays);
 router.patch('/review-admin-request', adminController.reviewAdminRequest);
+// Add this route alongside your existing admin routes:
+router.post('/enroll-face', authMiddleware, adminController.enrollUserFace);
 
 module.exports = router;

@@ -1,4 +1,5 @@
 const prisma = require('../config/db');
+const { uploadAttendancePhoto } = require('../utils/supabaseStorage');
 
 // --- HELPER: Safely parse vector to standard 128-float array ---
 function parseDescriptor(raw) {
@@ -11,7 +12,6 @@ function parseDescriptor(raw) {
       return null;
     }
   }
-  // Convert object with numeric keys (e.g. { '0': -0.12, '1': 0.05 }) or TypedArray into normal Array
   if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
     parsed = Object.values(parsed);
   }
@@ -24,7 +24,6 @@ function computeFaceDistance(desc1, desc2) {
   const d2 = parseDescriptor(desc2);
 
   if (!d1 || !d2 || d1.length !== 128 || d2.length !== 128) {
-    console.warn(`[BIOMETRIC] Invalid descriptor shape: d1=${d1?.length}, d2=${d2?.length}`);
     return 1.0;
   }
 
@@ -36,7 +35,31 @@ function computeFaceDistance(desc1, desc2) {
   return Math.sqrt(sum);
 }
 
-// 0.55 is standard threshold for mobile/webcam face-api matching
+// --- HELPER: Match against single vector OR multi-angle array [[128], [128], [128]] ---
+function getBestMatchDistance(liveVector, storedDescriptor) {
+  let parsed = storedDescriptor;
+  if (typeof parsed === 'string') {
+    try {
+      parsed = JSON.parse(parsed);
+    } catch {
+      return 1.0;
+    }
+  }
+
+  // If stored as multi-angle array: [ [128 floats], [128 floats], ... ]
+  if (Array.isArray(parsed) && Array.isArray(parsed[0])) {
+    let minDistance = 1.0;
+    for (const refVec of parsed) {
+      const dist = computeFaceDistance(liveVector, refVec);
+      if (dist < minDistance) minDistance = dist;
+    }
+    return minDistance;
+  }
+
+  // Single vector fallback
+  return computeFaceDistance(liveVector, parsed);
+}
+
 const MATCH_THRESHOLD = 0.55;
 
 exports.checkIn = async (req, res) => {
@@ -49,7 +72,6 @@ exports.checkIn = async (req, res) => {
       return res.status(403).json({ message: 'Account has been disbanded/disabled. Contact Admin.' });
     }
 
-    /* --- BIOMETRIC VERIFICATION --- */
     if (!user.faceDescriptor) {
       return res.status(403).json({
         message: 'No registered facial profile found. Please contact Admin for enrollment.',
@@ -63,8 +85,8 @@ exports.checkIn = async (req, res) => {
       });
     }
 
-    const distance = computeFaceDistance(liveVector, user.faceDescriptor);
-    console.log(`[BIOMETRIC CHECK-IN] User: ${user.email} | Score: ${distance.toFixed(3)} | Threshold: ${MATCH_THRESHOLD}`);
+    const distance = getBestMatchDistance(liveVector, user.faceDescriptor);
+    console.log(`[BIOMETRIC CHECK-IN] User: ${user.email} | Best Score: ${distance.toFixed(3)} | Threshold: ${MATCH_THRESHOLD}`);
 
     if (distance > MATCH_THRESHOLD) {
       return res.status(401).json({
@@ -89,7 +111,9 @@ exports.checkIn = async (req, res) => {
       });
     }
 
-    // Mapped correctly to schema fields: checkInLat, checkInLng, checkInPhoto
+    // Offload photo to Supabase Storage bucket (stores lightweight URL, not raw base64)
+    const photoUrl = await uploadAttendancePhoto(photo, userId, 'checkin');
+
     const attendance = await prisma.attendance.create({
       data: {
         userId,
@@ -97,7 +121,7 @@ exports.checkIn = async (req, res) => {
         inTime: now,
         checkInLat: latitude ? parseFloat(latitude) : null,
         checkInLng: longitude ? parseFloat(longitude) : null,
-        checkInPhoto: photo || null,
+        checkInPhoto: photoUrl || null,
       },
     });
 
@@ -118,7 +142,6 @@ exports.checkOut = async (req, res) => {
       return res.status(403).json({ message: 'Account has been disbanded/disabled. Contact Admin.' });
     }
 
-    /* --- BIOMETRIC VERIFICATION --- */
     if (user.faceDescriptor) {
       const liveVector = parseDescriptor(faceDescriptor);
       if (!liveVector || liveVector.length !== 128) {
@@ -127,8 +150,8 @@ exports.checkOut = async (req, res) => {
         });
       }
 
-      const distance = computeFaceDistance(liveVector, user.faceDescriptor);
-      console.log(`[BIOMETRIC CHECK-OUT] User: ${user.email} | Score: ${distance.toFixed(3)} | Threshold: ${MATCH_THRESHOLD}`);
+      const distance = getBestMatchDistance(liveVector, user.faceDescriptor);
+      console.log(`[BIOMETRIC CHECK-OUT] User: ${user.email} | Best Score: ${distance.toFixed(3)} | Threshold: ${MATCH_THRESHOLD}`);
 
       if (distance > MATCH_THRESHOLD) {
         return res.status(401).json({
@@ -149,7 +172,9 @@ exports.checkOut = async (req, res) => {
     const outTime = new Date();
     const workingHours = parseFloat(((outTime - new Date(activeShift.inTime)) / (1000 * 60 * 60)).toFixed(2));
 
-    // Mapped correctly to schema fields: checkOutLat, checkOutLng, checkOutPhoto
+    // Offload photo to Supabase Storage bucket
+    const photoUrl = await uploadAttendancePhoto(photo, userId, 'checkout');
+
     const updatedAttendance = await prisma.attendance.update({
       where: { id: activeShift.id },
       data: {
@@ -158,7 +183,7 @@ exports.checkOut = async (req, res) => {
         task: task || activeShift.task,
         checkOutLat: latitude ? parseFloat(latitude) : activeShift.checkOutLat,
         checkOutLng: longitude ? parseFloat(longitude) : activeShift.checkOutLng,
-        checkOutPhoto: photo || activeShift.checkOutPhoto,
+        checkOutPhoto: photoUrl || activeShift.checkOutPhoto,
       },
     });
 

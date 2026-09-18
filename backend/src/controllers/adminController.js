@@ -14,14 +14,55 @@ exports.getAllUsers = async (req, res) => {
         overtimeRate: true,
         isActive: true,
         adminRequestStatus: true,
+        faceDescriptor: true, // Included so frontend knows if face is enrolled
         createdAt: true,
       },
       orderBy: { name: 'asc' },
     });
-    // Return direct array for cleaner frontend mapping
-    return res.status(200).json(users);
+
+    // Transform faceDescriptor to a simple boolean flag for cleaner frontend consumption
+    const formattedUsers = users.map((u) => ({
+      ...u,
+      hasFaceEnrolled: Boolean(u.faceDescriptor),
+      faceDescriptor: undefined, // Strip raw vector data from list payloads to keep responses lightweight
+    }));
+
+    return res.status(200).json(formattedUsers);
   } catch (error) {
     return res.status(500).json({ message: 'Failed to fetch users', error: error.message });
+  }
+};
+
+// Admin registers or updates multi-angle face descriptors for an employee
+exports.enrollUserFace = async (req, res) => {
+  const { userId, faceDescriptors } = req.body;
+
+  if (!userId || !faceDescriptors) {
+    return res.status(400).json({ message: 'userId and faceDescriptors are required.' });
+  }
+
+  try {
+    const targetUser = await prisma.user.findUnique({ where: { id: userId } });
+    if (!targetUser) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    // Stores either multi-angle array [[128], [128], [128]] or single [128] as serialized JSON
+    const updatedUser = await prisma.user.update({
+      where: { id: userId },
+      data: {
+        faceDescriptor: typeof faceDescriptors === 'string' ? faceDescriptors : JSON.stringify(faceDescriptors),
+      },
+      select: { id: true, name: true, email: true },
+    });
+
+    return res.status(200).json({
+      message: `Biometric profile successfully registered for ${updatedUser.name}!`,
+      user: updatedUser,
+    });
+  } catch (error) {
+    console.error('Enroll Face Error:', error);
+    return res.status(500).json({ message: 'Failed to enroll face profile', error: error.message });
   }
 };
 
@@ -86,7 +127,6 @@ exports.deleteUser = async (req, res) => {
 exports.getHolidays = async (req, res) => {
   try {
     const holidays = await prisma.holiday.findMany({ orderBy: { date: 'asc' } });
-    // Return direct array for calendar matching
     return res.status(200).json(holidays);
   } catch (error) {
     return res.status(500).json({ message: 'Failed to fetch holidays', error: error.message });
