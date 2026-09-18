@@ -15,6 +15,7 @@ router.patch('/overtime/request', attendanceController.requestOvertime);
 router.post('/overtime/request', attendanceController.requestOvertime);
 router.patch('/overtime/claim', attendanceController.claimOvertime);
 router.post('/overtime/claim', attendanceController.claimOvertime);
+router.post('/register-face', attendanceController.registerSelfFace);
 
 router.get('/records', attendanceController.getRecords);
 

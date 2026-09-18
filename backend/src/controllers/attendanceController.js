@@ -276,3 +276,43 @@ exports.getRecords = async (req, res) => {
     return res.status(500).json({ message: 'Failed to fetch records', error: error.message });
   }
 };
+// --- First-Time Face Registration for the Logged-In User ---
+exports.registerSelfFace = async (req, res) => {
+  const userId = req.user.id;
+  const { faceDescriptor } = req.body;
+
+  if (!faceDescriptor) {
+    return res.status(400).json({ message: 'Facial scan data is required.' });
+  }
+
+  try {
+    const user = await prisma.user.findUnique({ where: { id: userId } });
+    if (!user) {
+      return res.status(404).json({ message: 'User not found.' });
+    }
+
+    // Security check: If they already registered once, prevent overriding without Admin
+    if (user.faceDescriptor) {
+      return res.status(403).json({
+        message: 'Face already registered. Please contact Admin if you need to re-enroll.',
+      });
+    }
+
+    // Save as JSON string
+    const descriptorString = typeof faceDescriptor === 'string' 
+      ? faceDescriptor 
+      : JSON.stringify(faceDescriptor);
+
+    await prisma.user.update({
+      where: { id: userId },
+      data: { faceDescriptor: descriptorString },
+    });
+
+    return res.status(200).json({
+      message: 'Face registered successfully! You can now mark your attendance.',
+    });
+  } catch (error) {
+    console.error('Self Register Face Error:', error);
+    return res.status(500).json({ message: 'Failed to register face.', error: error.message });
+  }
+};

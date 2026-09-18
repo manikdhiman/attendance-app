@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
 import api from '../api/axios';
 import AttendanceCameraModal from '../components/AttendanceCameraModal';
+import FaceEnrollmentModal from '../components/FaceEnrollmentModal';
 
 const EmployeeDashboard = () => {
+  const [user, setUser] = useState(() => JSON.parse(localStorage.getItem('user') || '{}'));
   const [records, setRecords] = useState([]);
   const [taskInput, setTaskInput] = useState('');
   const [overtimeHours, setOvertimeHours] = useState('');
@@ -12,6 +14,9 @@ const EmployeeDashboard = () => {
   // Live Camera & Location Modal
   const [modalOpen, setModalOpen] = useState(false);
   const [actionType, setActionType] = useState('checkIn'); // 'checkIn' or 'checkOut'
+
+  // Enrollment Gate Modal
+  const [enrollmentOpen, setEnrollmentOpen] = useState(false);
 
   const fetchRecords = async () => {
     try {
@@ -24,11 +29,22 @@ const EmployeeDashboard = () => {
 
   useEffect(() => {
     fetchRecords();
-  }, []);
+
+    // Check if the current user needs to register their face profile
+    if (user && user.hasFaceEnrolled === false) {
+      setEnrollmentOpen(true);
+    }
+  }, [user]);
 
   const activeRecord = records.find((r) => !r.outTime);
 
   const handleOpenAttendanceModal = (type) => {
+    if (user && user.hasFaceEnrolled === false) {
+      setMsg('You must complete your initial face registration first.');
+      setEnrollmentOpen(true);
+      return;
+    }
+
     if (type === 'checkOut' && !taskInput.trim()) {
       setMsg('Please fill in what you worked on today before checking out.');
       return;
@@ -38,31 +54,54 @@ const EmployeeDashboard = () => {
   };
 
   const handleAttendanceSubmit = async ({ latitude, longitude, photo, faceDescriptor }) => {
-  try {
-    if (actionType === 'checkIn') {
-      const res = await api.post('/attendance/check-in', {
-        latitude,
-        longitude,
-        photo,
-        faceDescriptor, // Sent to backend for verification
-      });
-      setMsg(res.data.message || 'Checked in successfully!');
-    } else {
-      const res = await api.post('/attendance/check-out', {
-        task: taskInput,
-        latitude,
-        longitude,
-        photo,
-        faceDescriptor, // Sent to backend for verification
-      });
-      setMsg(res.data.message || 'Checked out successfully!');
-      setTaskInput('');
+    try {
+      if (actionType === 'checkIn') {
+        const res = await api.post('/attendance/check-in', {
+          latitude,
+          longitude,
+          photo,
+          faceDescriptor,
+        });
+        setMsg(res.data.message || 'Checked in successfully!');
+      } else {
+        const res = await api.post('/attendance/check-out', {
+          task: taskInput,
+          latitude,
+          longitude,
+          photo,
+          faceDescriptor,
+        });
+        setMsg(res.data.message || 'Checked out successfully!');
+        setTaskInput('');
+      }
+      fetchRecords();
+    } catch (err) {
+      const errMsg = err.response?.data?.message || `${actionType === 'checkIn' ? 'Check-in' : 'Check-out'} failed`;
+      setMsg(errMsg);
+
+      // If backend reports no profile found, open enrollment modal directly
+      if (errMsg.toLowerCase().includes('no registered facial profile')) {
+        setEnrollmentOpen(true);
+      }
     }
-    fetchRecords();
-  } catch (err) {
-    setMsg(err.response?.data?.message || `${actionType === 'checkIn' ? 'Check-in' : 'Check-out'} failed`);
-  }
-};
+  };
+
+  const handleEnrollComplete = async (vectors) => {
+    try {
+      const res = await api.post('/attendance/register-face', {
+        faceDescriptor: vectors,
+      });
+
+      const updatedUser = { ...user, hasFaceEnrolled: true };
+      localStorage.setItem('user', JSON.stringify(updatedUser));
+      setUser(updatedUser);
+      setEnrollmentOpen(false);
+      setMsg(res.data.message || 'Face registered successfully! You can now mark attendance.');
+    } catch (err) {
+      setMsg(err.response?.data?.message || 'Failed to complete registration.');
+    }
+  };
+
   const handleOvertimeSubmit = async (e) => {
     e.preventDefault();
     try {
@@ -80,16 +119,14 @@ const EmployeeDashboard = () => {
   };
 
   return (
-    /* --- UPDATED: Responsive container padding (p-3 on mobile, p-6 on desktop) --- */
     <div className="max-w-6xl mx-auto p-3 sm:p-6 space-y-6">
       {msg && (
-        <div className="p-3 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded text-sm">
+        <div className="p-3 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-lg text-sm">
           {msg}
         </div>
       )}
 
-      {/* Check In / Out Action Card */}
-      {/* --- UPDATED: Stacked on mobile, aligned items on md screens --- */}
+      {/* Shift Status Card */}
       <div className="bg-white p-4 sm:p-6 rounded-xl shadow border border-gray-100 flex flex-col md:flex-row justify-between items-start md:items-center gap-4">
         <div className="w-full md:w-auto">
           <h2 className="text-xl font-bold text-gray-800">Shift Status</h2>
@@ -105,7 +142,6 @@ const EmployeeDashboard = () => {
           )}
         </div>
 
-        {/* --- UPDATED: Action controls full-width on mobile --- */}
         <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 w-full md:w-auto">
           {activeRecord && (
             <input
@@ -138,7 +174,6 @@ const EmployeeDashboard = () => {
       <div className="bg-white rounded-xl shadow border border-gray-100 overflow-hidden">
         <h3 className="text-base sm:text-lg font-bold p-4 sm:p-5 border-b text-gray-800">Your Attendance History</h3>
         
-        {/* --- UPDATED: Responsive horizontal scroll wrapper for table --- */}
         <div className="overflow-x-auto w-full">
           <table className="min-w-[750px] w-full text-left border-collapse text-sm">
             <thead>
@@ -246,7 +281,13 @@ const EmployeeDashboard = () => {
         </div>
       )}
 
-      {/* Mandatory Live Camera & Location Verification Modal */}
+      {/* First-Time Multi-Angle Enrollment Modal */}
+      <FaceEnrollmentModal
+        isOpen={enrollmentOpen}
+        onEnrollComplete={handleEnrollComplete}
+      />
+
+      {/* Daily Shift Check In / Out Modal */}
       <AttendanceCameraModal
         isOpen={modalOpen}
         actionType={actionType}

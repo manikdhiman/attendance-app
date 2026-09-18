@@ -85,6 +85,7 @@ exports.login = async (req, res) => {
         name: user.name,
         email: user.email,
         role: user.role,
+        hasFaceEnrolled: Boolean(user.faceDescriptor),
       },
     });
   } catch (error) {
