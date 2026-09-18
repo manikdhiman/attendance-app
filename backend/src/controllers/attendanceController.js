@@ -63,7 +63,11 @@ function getBestMatchDistance(liveVector, storedDescriptor) {
 const MATCH_THRESHOLD = 0.55;
 
 exports.checkIn = async (req, res) => {
-  const userId = req.user.id;
+  const userId = req.user?.id || req.user?.userId;
+  if (!userId) {
+    return res.status(401).json({ message: 'Unauthorized: Missing user authentication token.' });
+  }
+
   const { latitude, longitude, photo, faceDescriptor } = req.body;
 
   try {
@@ -133,7 +137,11 @@ exports.checkIn = async (req, res) => {
 };
 
 exports.checkOut = async (req, res) => {
-  const userId = req.user.id;
+  const userId = req.user?.id || req.user?.userId;
+  if (!userId) {
+    return res.status(401).json({ message: 'Unauthorized: Missing user authentication token.' });
+  }
+
   const { task, latitude, longitude, photo, faceDescriptor } = req.body;
 
   try {
@@ -256,9 +264,10 @@ exports.assignTask = async (req, res) => {
 
 exports.getRecords = async (req, res) => {
   try {
+    const userId = req.user?.id || req.user?.userId;
     let whereClause = {};
-    if (req.user.role === 'EMPLOYEE') {
-      whereClause.userId = req.user.id;
+    if (req.user?.role === 'EMPLOYEE') {
+      whereClause.userId = userId;
     }
 
     const records = await prisma.attendance.findMany({
@@ -276,26 +285,70 @@ exports.getRecords = async (req, res) => {
     return res.status(500).json({ message: 'Failed to fetch records', error: error.message });
   }
 };
+
+// --- Check if Current Logged-in User Has an Enrolled Face ---
+exports.getBiometricStatus = async (req, res) => {
+  try {
+    const userId = req.user?.id || req.user?.userId;
+    if (!userId) {
+      return res.status(401).json({ message: 'Unauthorized: No token credentials found.' });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: { id: userId },
+      select: { id: true, name: true, faceDescriptor: true },
+    });
+
+    if (!user) {
+      return res.status(404).json({ message: 'User not found.' });
+    }
+
+    const hasFaceEnrolled = Boolean(
+      user.faceDescriptor &&
+      (typeof user.faceDescriptor === 'string' ? user.faceDescriptor.trim().length > 2 : true)
+    );
+
+    return res.status(200).json({ hasFaceEnrolled });
+  } catch (error) {
+    console.error('getBiometricStatus error:', error);
+    return res.status(500).json({ message: 'Failed to check status', error: error.message });
+  }
+};
+
 // --- First-Time Face Registration for the Logged-In User ---
 exports.registerSelfFace = async (req, res) => {
-  const userId = req.user.id;
-  const { faceDescriptor } = req.body;
+  const userId = req.user?.id || req.user?.userId;
+  if (!userId) {
+    return res.status(401).json({ message: 'Unauthorized: No token credentials found.' });
+  }
 
+  const { faceDescriptor } = req.body;
   if (!faceDescriptor) {
     return res.status(400).json({ message: 'Face descriptor is required.' });
   }
 
   try {
-    // Stringify array of vectors [[128], [128], [128]]
-    const descriptorString = typeof faceDescriptor === 'string'
-      ? faceDescriptor
+    // Determine format to support String or Json Prisma columns
+    const descriptorData = typeof faceDescriptor === 'string' 
+      ? faceDescriptor 
       : JSON.stringify(faceDescriptor);
 
-    const updatedUser = await prisma.user.update({
-      where: { id: userId },
-      data: { faceDescriptor: descriptorString },
-      select: { id: true, name: true, email: true },
-    });
+    let updatedUser;
+    try {
+      // First attempt: string representation (standard Text column)
+      updatedUser = await prisma.user.update({
+        where: { id: userId },
+        data: { faceDescriptor: descriptorData },
+        select: { id: true, name: true, email: true },
+      });
+    } catch (prismaTypeErr) {
+      // Fallback: If schema is defined as Json type instead of String
+      updatedUser = await prisma.user.update({
+        where: { id: userId },
+        data: { faceDescriptor },
+        select: { id: true, name: true, email: true },
+      });
+    }
 
     console.log(`[BIOMETRIC ENROLLED] Successfully saved 3-angle vectors for ${updatedUser.email}`);
 
@@ -306,24 +359,5 @@ exports.registerSelfFace = async (req, res) => {
   } catch (error) {
     console.error('registerSelfFace error:', error);
     return res.status(500).json({ message: 'Failed to save biometric profile to database', error: error.message });
-  }
-};
-
-exports.getBiometricStatus = async (req, res) => {
-  try {
-    const user = await prisma.user.findUnique({
-      where: { id: req.user.id },
-      select: { id: true, name: true, faceDescriptor: true },
-    });
-
-    if (!user) {
-      return res.status(404).json({ message: 'User not found.' });
-    }
-
-    return res.status(200).json({
-      hasFaceEnrolled: Boolean(user.faceDescriptor),
-    });
-  } catch (error) {
-    return res.status(500).json({ message: 'Failed to check status', error: error.message });
   }
 };

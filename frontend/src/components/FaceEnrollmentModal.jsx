@@ -16,7 +16,8 @@ export default function FaceEnrollmentModal({ isOpen, onClose, onEnrollComplete 
   const [feedback, setFeedback] = useState('Initializing camera...');
   const [capturedVectors, setCapturedVectors] = useState([]);
   const [holdProgress, setHoldProgress] = useState(0);
-  const [isDone, setIsDone] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [enrollError, setEnrollError] = useState('');
 
   const isScanningRef = useRef(false);
   const stageIndexRef = useRef(0);
@@ -43,9 +44,12 @@ export default function FaceEnrollmentModal({ isOpen, onClose, onEnrollComplete 
       return;
     }
 
+    let isMounted = true;
+
     const start = async () => {
       try {
-        setIsDone(false);
+        setIsSubmitting(false);
+        setEnrollError('');
         setCurrentStageIndex(0);
         setCapturedVectors([]);
         vectorsRef.current = [];
@@ -60,6 +64,11 @@ export default function FaceEnrollmentModal({ isOpen, onClose, onEnrollComplete 
         const stream = await navigator.mediaDevices.getUserMedia({
           video: { width: 640, height: 480, facingMode: 'user' },
         });
+
+        if (!isMounted) {
+          stream.getTracks().forEach((t) => t.stop());
+          return;
+        }
 
         streamRef.current = stream;
 
@@ -77,13 +86,17 @@ export default function FaceEnrollmentModal({ isOpen, onClose, onEnrollComplete 
 
     start();
 
-    return () => stopCameraAndLoop();
+    return () => {
+      isMounted = false;
+      stopCameraAndLoop();
+    };
   }, [isOpen]);
 
   const processFrame = async () => {
     if (
       !videoRef.current ||
       isScanningRef.current ||
+      isSubmitting ||
       videoRef.current.paused ||
       videoRef.current.ended
     ) {
@@ -94,7 +107,7 @@ export default function FaceEnrollmentModal({ isOpen, onClose, onEnrollComplete 
       const detection = await faceapi
         .detectSingleFace(
           videoRef.current,
-          new faceapi.SsdMobilenetv1Options({ minConfidence: 0.75 })
+          new faceapi.SsdMobilenetv1Options({ minConfidence: 0.65 })
         )
         .withFaceLandmarks()
         .withFaceDescriptor();
@@ -102,19 +115,19 @@ export default function FaceEnrollmentModal({ isOpen, onClose, onEnrollComplete 
       if (!detection) {
         holdStartRef.current = null;
         setHoldProgress(0);
-        setFeedback('⚠️ Center your face inside the circle with clear light');
+        setFeedback('⚠️ Center your face inside the circle with clear lighting');
         return;
       }
 
       const box = detection.detection.box;
-      if (box.width < 110 || box.height < 110) {
+      if (box.width < 100 || box.height < 100) {
         holdStartRef.current = null;
         setHoldProgress(0);
         setFeedback('Move a bit closer to the camera');
         return;
       }
 
-      // Check yaw angle via nose and cheeks
+      // Yaw check using nose (30) and jaw contours (2 and 16)
       const landmarks = detection.landmarks.positions;
       const noseTip = landmarks[30];
       const leftCheek = landmarks[2];
@@ -139,11 +152,11 @@ export default function FaceEnrollmentModal({ isOpen, onClose, onEnrollComplete 
       }
 
       const elapsed = Date.now() - holdStartRef.current;
-      const progress = Math.min(100, Math.round((elapsed / 900) * 100));
+      const progress = Math.min(100, Math.round((elapsed / 800) * 100));
       setHoldProgress(progress);
       setFeedback(`Holding steady... ${progress}%`);
 
-      if (elapsed >= 900) {
+      if (elapsed >= 800) {
         isScanningRef.current = true;
         holdStartRef.current = null;
         setHoldProgress(0);
@@ -159,16 +172,31 @@ export default function FaceEnrollmentModal({ isOpen, onClose, onEnrollComplete 
           setFeedback(STAGES[nextIndex].label);
           isScanningRef.current = false;
         } else {
-          // --- STEP 3 COMPLETE: STOP LOOP AND SAVE IMMEDIATELY ---
-          setIsDone(true);
+          // --- STEP 3 COMPLETE: DISARM SCANNER & SUBMIT ---
+          setIsSubmitting(true);
           stopCameraAndLoop();
-          setFeedback('✅ All 3 angles saved! Registering with database...');
-          await onEnrollComplete(nextList);
+          setFeedback('✅ All 3 angles captured! Saving to database...');
+          await submitEnrollment(nextList);
         }
       }
     } catch (e) {
-      console.error('Frame processing error:', e);
+      console.error('Frame error:', e);
       isScanningRef.current = false;
+    }
+  };
+
+  const submitEnrollment = async (vectorsToSave) => {
+    try {
+      setEnrollError('');
+      await onEnrollComplete(vectorsToSave);
+      // onEnrollComplete in EmployeeDashboard handles closing the modal upon success
+    } catch (err) {
+      console.error('Submission error at step 3:', err);
+      const message =
+        err.response?.data?.message || err.message || 'Database write failed.';
+      setEnrollError(message);
+      setFeedback('❌ Failed to save face to database.');
+      setIsSubmitting(false);
     }
   };
 
@@ -179,9 +207,12 @@ export default function FaceEnrollmentModal({ isOpen, onClose, onEnrollComplete 
       <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl text-center space-y-4">
         <div>
           <h3 className="text-lg font-bold text-gray-800">Biometric 3-Step Setup</h3>
-          <p className="text-xs text-gray-500 mt-1">One-time enrollment. Once complete, daily check-ins require only 1 quick scan.</p>
+          <p className="text-xs text-gray-500 mt-1">
+            One-time enrollment. Follow on-screen head turns.
+          </p>
         </div>
 
+        {/* Step dots */}
         <div className="flex justify-center gap-2">
           {STAGES.map((s, idx) => (
             <div
@@ -197,21 +228,50 @@ export default function FaceEnrollmentModal({ isOpen, onClose, onEnrollComplete 
           ))}
         </div>
 
-        <div className="relative mx-auto w-56 h-56 rounded-full overflow-hidden border-4 border-indigo-600 bg-black shadow-inner">
-          <video ref={videoRef} playsInline muted className="w-full h-full object-cover scale-x-[-1]" />
-          {holdProgress > 0 && (
+        {/* Camera circle */}
+        <div className="relative mx-auto w-56 h-56 rounded-full overflow-hidden border-4 border-indigo-600 bg-black shadow-inner flex items-center justify-center">
+          <video
+            ref={videoRef}
+            playsInline
+            muted
+            className={`w-full h-full object-cover scale-x-[-1] ${
+              isSubmitting ? 'opacity-40' : 'opacity-100'
+            }`}
+          />
+          {holdProgress > 0 && !isSubmitting && (
             <div
               className="absolute inset-0 border-4 border-emerald-400 rounded-full pointer-events-none transition-all"
               style={{ opacity: holdProgress / 100 }}
             />
           )}
+          {isSubmitting && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center text-white bg-black/50 p-2 space-y-2">
+              <div className="w-8 h-8 border-4 border-indigo-400 border-t-transparent rounded-full animate-spin" />
+              <span className="text-xs font-semibold">Writing to Supabase...</span>
+            </div>
+          )}
         </div>
 
+        {/* Status text */}
         <div className="min-h-[44px] flex items-center justify-center px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-xl">
           <p className="text-xs font-semibold text-slate-800">{feedback}</p>
         </div>
 
-        {!isDone && onClose && (
+        {/* Surface exact backend error if it fails */}
+        {enrollError && (
+          <div className="p-2.5 bg-red-50 border border-red-200 text-red-700 text-xs rounded-lg text-left">
+            <strong>Error:</strong> {enrollError}
+            <button
+              type="button"
+              onClick={() => submitEnrollment(vectorsRef.current)}
+              className="mt-2 w-full py-1.5 bg-red-600 hover:bg-red-700 text-white font-semibold rounded cursor-pointer transition text-xs"
+            >
+              Retry Saving
+            </button>
+          </div>
+        )}
+
+        {!isSubmitting && onClose && (
           <button
             type="button"
             onClick={() => {

@@ -6,6 +6,81 @@ datasource db {
   provider = "postgresql"
 }
 
+model User {
+  id                 String        @id @default(uuid())
+  name               String
+  email              String        @unique
+  password           String
+  role               Role          @default(EMPLOYEE)
+  adminRequestStatus RequestStatus @default(NONE)
+  baseSalary         Float         @default(0)
+  overtimeRate       Float         @default(0)
+  isActive           Boolean       @default(true)
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @default(now()) @updatedAt
+  faceDescriptor     Json?
+  attendances        Attendance[]
+}
+
+model Attendance {
+  id             String        @id @default(uuid())
+  userId         String
+  date           DateTime      @default(now())
+  inTime         DateTime?
+  outTime        DateTime?
+  workingHours   Float?
+  task           String?
+  assignedTask   String?
+  overtimeHours  Float         @default(0)
+  overtimeStatus RequestStatus @default(NONE)
+  checkInPhoto   String?
+  checkOutPhoto  String?
+  checkInLat     Float?
+  checkInLng     Float?
+  checkOutLat    Float?
+  checkOutLng    Float?
+  isWithinOffice Boolean       @default(false)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @default(now()) @updatedAt
+  user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model Holiday {
+  id        String   @id @default(dbgenerated("(gen_random_uuid())::text"))
+  title     String
+  date      DateTime @unique
+  createdAt DateTime @default(now())
+}
+
+/// This model contains row level security and requires additional setup for migrations. Visit https://pris.ly/d/row-level-security for more info.
+model inquiries {
+  id         String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  created_at DateTime @default(dbgenerated("timezone('utc'::text, now())")) @db.Timestamptz(6)
+  name       String
+  email      String
+  message    String
+  type       String
+}
+
+model leads {
+  id      BigInt  @id @default(autoincrement())
+  name    String
+  email   String
+  mobile  String
+  message String?
+}
+
+model quotes {
+  id         BigInt   @id @default(autoincrement())
+  name       String
+  email      String
+  mobile     String
+  company    String?
+  service    String?
+  message    String?
+  created_at DateTime @default(dbgenerated("timezone('utc'::text, now())")) @db.Timestamptz(6)
+}
+
 enum Role {
   ADMIN
   EMPLOYEE
@@ -16,45 +91,4 @@ enum RequestStatus {
   PENDING
   APPROVED
   REJECTED
-}
-
-model User {
-  id                 String         @id @default(uuid())
-  name               String
-  email              String         @unique
-  password           String
-  role               Role           @default(EMPLOYEE)
-  adminRequestStatus RequestStatus  @default(NONE)
-  baseSalary         Float          @default(0)
-  overtimeRate       Float          @default(0)
-  isActive           Boolean        @default(true)
-  attendances        Attendance[]
-  createdAt          DateTime       @default(now())
-  updatedAt          DateTime       @updatedAt
-}
-
-model Attendance {
-  id              String         @id @default(uuid())
-  userId          String
-  user            User           @relation(fields: [userId], references: [id])
-  date            DateTime       @default(now())
-  inTime          DateTime?
-  outTime         DateTime?
-  workingHours    Float?
-  task            String?
-  assignedTask    String?
-  overtimeHours   Float          @default(0)
-  overtimeStatus  RequestStatus  @default(NONE)
-  
-  // Geofence & Live Camera Fields
-  checkInPhoto    String?        @db.Text
-  checkOutPhoto   String?        @db.Text
-  checkInLat      Float?
-  checkInLng      Float?
-  checkOutLat     Float?
-  checkOutLng     Float?
-  isWithinOffice  Boolean        @default(false)
-
-  createdAt       DateTime       @default(now())
-  updatedAt       DateTime       @updatedAt
 }
