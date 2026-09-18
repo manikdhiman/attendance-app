@@ -9,10 +9,14 @@ const STAGES = [
 
 export default function FaceEnrollmentModal({ isOpen, onClose, onEnrollComplete }) {
   const videoRef = useRef(null);
+  const streamRef = useRef(null);
+  const intervalRef = useRef(null);
+
   const [currentStageIndex, setCurrentStageIndex] = useState(0);
   const [feedback, setFeedback] = useState('Initializing camera...');
   const [capturedVectors, setCapturedVectors] = useState([]);
   const [holdProgress, setHoldProgress] = useState(0);
+  const [isDone, setIsDone] = useState(false);
 
   const isScanningRef = useRef(false);
   const stageIndexRef = useRef(0);
@@ -22,23 +26,42 @@ export default function FaceEnrollmentModal({ isOpen, onClose, onEnrollComplete 
   stageIndexRef.current = currentStageIndex;
   vectorsRef.current = capturedVectors;
 
-  useEffect(() => {
-    if (!isOpen) return;
+  const stopCameraAndLoop = () => {
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current);
+      intervalRef.current = null;
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+  };
 
-    let stream = null;
-    let intervalId = null;
+  useEffect(() => {
+    if (!isOpen) {
+      stopCameraAndLoop();
+      return;
+    }
 
     const start = async () => {
       try {
+        setIsDone(false);
+        setCurrentStageIndex(0);
+        setCapturedVectors([]);
+        vectorsRef.current = [];
+        isScanningRef.current = false;
+
         await Promise.all([
           faceapi.nets.ssdMobilenetv1.loadFromUri('/models'),
           faceapi.nets.faceLandmark68Net.loadFromUri('/models'),
           faceapi.nets.faceRecognitionNet.loadFromUri('/models'),
         ]);
 
-        stream = await navigator.mediaDevices.getUserMedia({
+        const stream = await navigator.mediaDevices.getUserMedia({
           video: { width: 640, height: 480, facingMode: 'user' },
         });
+
+        streamRef.current = stream;
 
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
@@ -46,46 +69,52 @@ export default function FaceEnrollmentModal({ isOpen, onClose, onEnrollComplete 
         }
 
         setFeedback(STAGES[0].label);
-        intervalId = setInterval(processFrame, 150);
+        intervalRef.current = setInterval(processFrame, 150);
       } catch (err) {
-        setFeedback('Camera or AI model loading error: ' + err.message);
+        setFeedback('Camera or AI loading error: ' + err.message);
       }
     };
 
     start();
 
-    return () => {
-      if (intervalId) clearInterval(intervalId);
-      if (stream) stream.getTracks().forEach((t) => t.stop());
-    };
+    return () => stopCameraAndLoop();
   }, [isOpen]);
 
   const processFrame = async () => {
-    if (!videoRef.current || isScanningRef.current || videoRef.current.paused || videoRef.current.ended) {
+    if (
+      !videoRef.current ||
+      isScanningRef.current ||
+      videoRef.current.paused ||
+      videoRef.current.ended
+    ) {
       return;
     }
 
     try {
       const detection = await faceapi
-        .detectSingleFace(videoRef.current, new faceapi.SsdMobilenetv1Options({ minConfidence: 0.75 }))
+        .detectSingleFace(
+          videoRef.current,
+          new faceapi.SsdMobilenetv1Options({ minConfidence: 0.75 })
+        )
         .withFaceLandmarks()
         .withFaceDescriptor();
 
       if (!detection) {
         holdStartRef.current = null;
         setHoldProgress(0);
-        setFeedback('⚠️ Bring your face closer to the circle with good lighting');
+        setFeedback('⚠️ Center your face inside the circle with clear light');
         return;
       }
 
       const box = detection.detection.box;
-      if (box.width < 120 || box.height < 120) {
+      if (box.width < 110 || box.height < 110) {
         holdStartRef.current = null;
         setHoldProgress(0);
         setFeedback('Move a bit closer to the camera');
         return;
       }
 
+      // Check yaw angle via nose and cheeks
       const landmarks = detection.landmarks.positions;
       const noseTip = landmarks[30];
       const leftCheek = landmarks[2];
@@ -110,11 +139,11 @@ export default function FaceEnrollmentModal({ isOpen, onClose, onEnrollComplete 
       }
 
       const elapsed = Date.now() - holdStartRef.current;
-      const progress = Math.min(100, Math.round((elapsed / 1000) * 100));
+      const progress = Math.min(100, Math.round((elapsed / 900) * 100));
       setHoldProgress(progress);
       setFeedback(`Holding steady... ${progress}%`);
 
-      if (elapsed >= 1000) {
+      if (elapsed >= 900) {
         isScanningRef.current = true;
         holdStartRef.current = null;
         setHoldProgress(0);
@@ -122,6 +151,7 @@ export default function FaceEnrollmentModal({ isOpen, onClose, onEnrollComplete 
         const newVector = Array.from(detection.descriptor);
         const nextList = [...vectorsRef.current, newVector];
         setCapturedVectors(nextList);
+        vectorsRef.current = nextList;
 
         if (stageIndexRef.current + 1 < STAGES.length) {
           const nextIndex = stageIndexRef.current + 1;
@@ -129,13 +159,16 @@ export default function FaceEnrollmentModal({ isOpen, onClose, onEnrollComplete 
           setFeedback(STAGES[nextIndex].label);
           isScanningRef.current = false;
         } else {
-          setFeedback('✅ All 3 angles verified! Registering your profile...');
+          // --- STEP 3 COMPLETE: STOP LOOP AND SAVE IMMEDIATELY ---
+          setIsDone(true);
+          stopCameraAndLoop();
+          setFeedback('✅ All 3 angles saved! Registering with database...');
           await onEnrollComplete(nextList);
-          isScanningRef.current = false;
         }
       }
     } catch (e) {
       console.error('Frame processing error:', e);
+      isScanningRef.current = false;
     }
   };
 
@@ -146,7 +179,7 @@ export default function FaceEnrollmentModal({ isOpen, onClose, onEnrollComplete 
       <div className="bg-white rounded-3xl p-6 max-w-sm w-full shadow-2xl text-center space-y-4">
         <div>
           <h3 className="text-lg font-bold text-gray-800">Biometric 3-Step Setup</h3>
-          <p className="text-xs text-gray-500 mt-1">Automatic hands-free scan. Rotate your head as prompted.</p>
+          <p className="text-xs text-gray-500 mt-1">One-time enrollment. Once complete, daily check-ins require only 1 quick scan.</p>
         </div>
 
         <div className="flex justify-center gap-2">
@@ -178,13 +211,18 @@ export default function FaceEnrollmentModal({ isOpen, onClose, onEnrollComplete 
           <p className="text-xs font-semibold text-slate-800">{feedback}</p>
         </div>
 
-        <button
-          type="button"
-          onClick={onClose}
-          className="text-xs text-gray-500 hover:text-gray-700 underline cursor-pointer"
-        >
-          Cancel
-        </button>
+        {!isDone && onClose && (
+          <button
+            type="button"
+            onClick={() => {
+              stopCameraAndLoop();
+              onClose();
+            }}
+            className="text-xs text-gray-500 hover:text-gray-700 underline cursor-pointer"
+          >
+            Cancel
+          </button>
+        )}
       </div>
     </div>
   );

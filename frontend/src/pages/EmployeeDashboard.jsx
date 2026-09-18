@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import api from '../api/axios';
 import AttendanceCameraModal from '../components/AttendanceCameraModal';
 import FaceEnrollmentModal from '../components/FaceEnrollmentModal';
@@ -27,24 +27,25 @@ const EmployeeDashboard = () => {
     }
   };
 
-  const checkBiometricStatus = async () => {
+  const checkBiometricStatus = useCallback(async () => {
     try {
       const res = await api.get('/attendance/biometric-status');
       if (!res.data.hasFaceEnrolled) {
         setNeedsFaceEnrollment(true);
-        setEnrollmentModalOpen(true); // Automatically open the 3-step modal
+        setEnrollmentModalOpen(true);
       } else {
         setNeedsFaceEnrollment(false);
+        setEnrollmentModalOpen(false);
       }
     } catch (err) {
       console.error('Status check error:', err);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchRecords();
     checkBiometricStatus();
-  }, []);
+  }, [checkBiometricStatus]);
 
   const activeRecord = records.find((r) => !r.outTime);
 
@@ -66,12 +67,22 @@ const EmployeeDashboard = () => {
   const handleEnrollComplete = async (vectors) => {
     try {
       const res = await api.post('/attendance/register-face', { faceDescriptor: vectors });
+      
+      // Update local storage user profile if present
+      const storedUser = JSON.parse(localStorage.getItem('user') || '{}');
+      localStorage.setItem('user', JSON.stringify({ ...storedUser, hasFaceEnrolled: true }));
+
       setMsg(res.data.message || 'Face registered successfully! You can now check in.');
       setNeedsFaceEnrollment(false);
       setEnrollmentModalOpen(false);
-      fetchRecords();
+      
+      // Re-verify with backend and fetch records
+      await checkBiometricStatus();
+      await fetchRecords();
     } catch (err) {
+      console.error('Enroll complete error:', err);
       setMsg(err.response?.data?.message || 'Failed to complete registration.');
+      setEnrollmentModalOpen(false);
     }
   };
 
@@ -298,14 +309,14 @@ const EmployeeDashboard = () => {
         </div>
       )}
 
-      {/* 1. Dedicated 3-Step Head-Turn Enrollment Modal */}
+      {/* 1. Mandatory 3-Step Head-Turn Enrollment Modal */}
       <FaceEnrollmentModal
         isOpen={enrollmentModalOpen}
         onClose={() => setEnrollmentModalOpen(false)}
         onEnrollComplete={handleEnrollComplete}
       />
 
-      {/* 2. Daily Attendance Verification Modal */}
+      {/* 2. Daily Attendance Verification Modal (1-Step) */}
       <AttendanceCameraModal
         isOpen={attendanceModalOpen}
         actionType={actionType}

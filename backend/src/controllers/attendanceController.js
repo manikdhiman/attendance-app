@@ -286,23 +286,29 @@ exports.registerSelfFace = async (req, res) => {
   }
 
   try {
+    // Stringify array of vectors [[128], [128], [128]]
     const descriptorString = typeof faceDescriptor === 'string'
       ? faceDescriptor
       : JSON.stringify(faceDescriptor);
 
-    await prisma.user.update({
+    const updatedUser = await prisma.user.update({
       where: { id: userId },
       data: { faceDescriptor: descriptorString },
+      select: { id: true, name: true, email: true },
     });
+
+    console.log(`[BIOMETRIC ENROLLED] Successfully saved 3-angle vectors for ${updatedUser.email}`);
 
     return res.status(200).json({
       message: 'Biometric profile registered successfully! You can now check in.',
+      user: updatedUser,
     });
   } catch (error) {
     console.error('registerSelfFace error:', error);
-    return res.status(500).json({ message: 'Failed to save biometric face profile', error: error.message });
+    return res.status(500).json({ message: 'Failed to save biometric profile to database', error: error.message });
   }
 };
+
 exports.getBiometricStatus = async (req, res) => {
   try {
     const user = await prisma.user.findUnique({
