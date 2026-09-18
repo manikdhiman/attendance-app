@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import api from '../api/axios';
 import AttendanceCameraModal from '../components/AttendanceCameraModal';
+import FaceEnrollmentModal from '../components/FaceEnrollmentModal';
 
 const EmployeeDashboard = () => {
   const [records, setRecords] = useState([]);
@@ -10,9 +11,12 @@ const EmployeeDashboard = () => {
   const [msg, setMsg] = useState('');
   const [needsFaceEnrollment, setNeedsFaceEnrollment] = useState(false);
 
-  // Live Camera Modal State
-  const [modalOpen, setModalOpen] = useState(false);
-  const [actionType, setActionType] = useState('checkIn'); // 'checkIn', 'checkOut', or 'register'
+  // Daily Shift Attendance Modal (Single snapshot & coordinates)
+  const [attendanceModalOpen, setAttendanceModalOpen] = useState(false);
+  const [actionType, setActionType] = useState('checkIn');
+
+  // 3-Step Biometric Enrollment Modal
+  const [enrollmentModalOpen, setEnrollmentModalOpen] = useState(false);
 
   const fetchRecords = async () => {
     try {
@@ -23,15 +27,12 @@ const EmployeeDashboard = () => {
     }
   };
 
-  // Check Supabase directly for biometric profile status on mount
   const checkBiometricStatus = async () => {
     try {
       const res = await api.get('/attendance/biometric-status');
       if (!res.data.hasFaceEnrolled) {
         setNeedsFaceEnrollment(true);
-        setActionType('register');
-        setModalOpen(true);
-        setMsg('First-time biometric setup required. Please scan your face to register.');
+        setEnrollmentModalOpen(true); // Automatically open the 3-step modal
       } else {
         setNeedsFaceEnrollment(false);
       }
@@ -47,10 +48,9 @@ const EmployeeDashboard = () => {
 
   const activeRecord = records.find((r) => !r.outTime);
 
-  const handleOpenAttendanceModal = (type) => {
+  const handleOpenAttendance = (type) => {
     if (needsFaceEnrollment) {
-      setActionType('register');
-      setModalOpen(true);
+      setEnrollmentModalOpen(true);
       return;
     }
 
@@ -59,21 +59,24 @@ const EmployeeDashboard = () => {
       return;
     }
     setActionType(type);
-    setModalOpen(true);
+    setAttendanceModalOpen(true);
+  };
+
+  // Called when all 3 angles (front, left, right) are captured
+  const handleEnrollComplete = async (vectors) => {
+    try {
+      const res = await api.post('/attendance/register-face', { faceDescriptor: vectors });
+      setMsg(res.data.message || 'Face registered successfully! You can now check in.');
+      setNeedsFaceEnrollment(false);
+      setEnrollmentModalOpen(false);
+      fetchRecords();
+    } catch (err) {
+      setMsg(err.response?.data?.message || 'Failed to complete registration.');
+    }
   };
 
   const handleAttendanceSubmit = async ({ latitude, longitude, photo, faceDescriptor }) => {
     try {
-      // 1. Face Registration Mode
-      if (actionType === 'register') {
-        const res = await api.post('/attendance/register-face', { faceDescriptor });
-        setMsg(res.data.message || 'Face registered successfully! You can now check in.');
-        setNeedsFaceEnrollment(false);
-        setModalOpen(false);
-        return;
-      }
-
-      // 2. Normal Check In
       if (actionType === 'checkIn') {
         const res = await api.post('/attendance/check-in', {
           latitude,
@@ -82,10 +85,7 @@ const EmployeeDashboard = () => {
           faceDescriptor,
         });
         setMsg(res.data.message || 'Checked in successfully!');
-        setModalOpen(false);
-      } 
-      // 3. Check Out
-      else {
+      } else {
         const res = await api.post('/attendance/check-out', {
           task: taskInput,
           latitude,
@@ -95,19 +95,18 @@ const EmployeeDashboard = () => {
         });
         setMsg(res.data.message || 'Checked out successfully!');
         setTaskInput('');
-        setModalOpen(false);
       }
 
+      setAttendanceModalOpen(false);
       fetchRecords();
     } catch (err) {
       const errorResponse = err.response?.data?.message || 'Action failed';
       setMsg(errorResponse);
 
-      // Fallback: If backend returns missing facial profile error, trigger registration
       if (errorResponse.toLowerCase().includes('no registered facial profile')) {
         setNeedsFaceEnrollment(true);
-        setActionType('register');
-        setModalOpen(true);
+        setAttendanceModalOpen(false);
+        setEnrollmentModalOpen(true);
       }
     }
   };
@@ -130,14 +129,12 @@ const EmployeeDashboard = () => {
 
   return (
     <div className="max-w-6xl mx-auto p-3 sm:p-6 space-y-6">
-      {/* Dynamic Notification Banner */}
       {msg && (
         <div className="p-4 bg-indigo-50 border border-indigo-200 text-indigo-800 rounded-xl text-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
           <span>{msg}</span>
-          
           {needsFaceEnrollment && (
             <button
-              onClick={() => handleOpenAttendanceModal('register')}
+              onClick={() => setEnrollmentModalOpen(true)}
               className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-4 py-2 rounded-lg text-xs shadow cursor-pointer whitespace-nowrap"
             >
               Register Face Now
@@ -174,14 +171,14 @@ const EmployeeDashboard = () => {
           )}
           {!activeRecord ? (
             <button
-              onClick={() => handleOpenAttendanceModal('checkIn')}
+              onClick={() => handleOpenAttendance('checkIn')}
               className="w-full sm:w-auto bg-green-600 hover:bg-green-700 text-white font-semibold px-6 py-2.5 rounded-lg shadow transition cursor-pointer text-sm text-center"
             >
               Check In
             </button>
           ) : (
             <button
-              onClick={() => handleOpenAttendanceModal('checkOut')}
+              onClick={() => handleOpenAttendance('checkOut')}
               className="w-full sm:w-auto bg-red-600 hover:bg-red-700 text-white font-semibold px-6 py-2.5 rounded-lg shadow transition cursor-pointer text-sm text-center"
             >
               Check Out
@@ -301,16 +298,18 @@ const EmployeeDashboard = () => {
         </div>
       )}
 
-      {/* Attendance & Biometric Registration Camera Modal */}
+      {/* 1. Dedicated 3-Step Head-Turn Enrollment Modal */}
+      <FaceEnrollmentModal
+        isOpen={enrollmentModalOpen}
+        onClose={() => setEnrollmentModalOpen(false)}
+        onEnrollComplete={handleEnrollComplete}
+      />
+
+      {/* 2. Daily Attendance Verification Modal */}
       <AttendanceCameraModal
-        isOpen={modalOpen}
+        isOpen={attendanceModalOpen}
         actionType={actionType}
-        onClose={() => {
-          // If the user hasn't enrolled yet, do not allow dismissing the registration modal
-          if (!needsFaceEnrollment) {
-            setModalOpen(false);
-          }
-        }}
+        onClose={() => setAttendanceModalOpen(false)}
         onConfirm={handleAttendanceSubmit}
       />
     </div>
