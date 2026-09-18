@@ -1,22 +1,18 @@
 import { useState, useEffect } from 'react';
 import api from '../api/axios';
 import AttendanceCameraModal from '../components/AttendanceCameraModal';
-import FaceEnrollmentModal from '../components/FaceEnrollmentModal';
 
 const EmployeeDashboard = () => {
-  const [user, setUser] = useState(() => JSON.parse(localStorage.getItem('user') || '{}'));
   const [records, setRecords] = useState([]);
   const [taskInput, setTaskInput] = useState('');
   const [overtimeHours, setOvertimeHours] = useState('');
   const [selectedRecordId, setSelectedRecordId] = useState(null);
   const [msg, setMsg] = useState('');
+  const [needsFaceEnrollment, setNeedsFaceEnrollment] = useState(false);
 
-  // Live Camera & Location Modal
+  // Live Camera Modal State
   const [modalOpen, setModalOpen] = useState(false);
-  const [actionType, setActionType] = useState('checkIn'); // 'checkIn' or 'checkOut'
-
-  // Enrollment Gate Modal
-  const [enrollmentOpen, setEnrollmentOpen] = useState(false);
+  const [actionType, setActionType] = useState('checkIn'); // 'checkIn', 'checkOut', or 'register'
 
   const fetchRecords = async () => {
     try {
@@ -29,22 +25,11 @@ const EmployeeDashboard = () => {
 
   useEffect(() => {
     fetchRecords();
-
-    // Check if the current user needs to register their face profile
-    if (user && user.hasFaceEnrolled === false) {
-      setEnrollmentOpen(true);
-    }
-  }, [user]);
+  }, []);
 
   const activeRecord = records.find((r) => !r.outTime);
 
   const handleOpenAttendanceModal = (type) => {
-    if (user && user.hasFaceEnrolled === false) {
-      setMsg('You must complete your initial face registration first.');
-      setEnrollmentOpen(true);
-      return;
-    }
-
     if (type === 'checkOut' && !taskInput.trim()) {
       setMsg('Please fill in what you worked on today before checking out.');
       return;
@@ -55,6 +40,15 @@ const EmployeeDashboard = () => {
 
   const handleAttendanceSubmit = async ({ latitude, longitude, photo, faceDescriptor }) => {
     try {
+      // 1. If currently in Face Registration mode
+      if (actionType === 'register') {
+        const res = await api.post('/attendance/register-face', { faceDescriptor });
+        setMsg(res.data.message || 'Face registered successfully! You can now check in.');
+        setNeedsFaceEnrollment(false);
+        return;
+      }
+
+      // 2. Normal Check In
       if (actionType === 'checkIn') {
         const res = await api.post('/attendance/check-in', {
           latitude,
@@ -63,7 +57,10 @@ const EmployeeDashboard = () => {
           faceDescriptor,
         });
         setMsg(res.data.message || 'Checked in successfully!');
-      } else {
+        setNeedsFaceEnrollment(false);
+      } 
+      // 3. Check Out
+      else {
         const res = await api.post('/attendance/check-out', {
           task: taskInput,
           latitude,
@@ -74,31 +71,16 @@ const EmployeeDashboard = () => {
         setMsg(res.data.message || 'Checked out successfully!');
         setTaskInput('');
       }
+
       fetchRecords();
     } catch (err) {
-      const errMsg = err.response?.data?.message || `${actionType === 'checkIn' ? 'Check-in' : 'Check-out'} failed`;
-      setMsg(errMsg);
+      const errorResponse = err.response?.data?.message || 'Action failed';
+      setMsg(errorResponse);
 
-      // If backend reports no profile found, open enrollment modal directly
-      if (errMsg.toLowerCase().includes('no registered facial profile')) {
-        setEnrollmentOpen(true);
+      // If backend says no profile exists, flag it so the prompt button shows up
+      if (errorResponse.toLowerCase().includes('no registered facial profile')) {
+        setNeedsFaceEnrollment(true);
       }
-    }
-  };
-
-  const handleEnrollComplete = async (vectors) => {
-    try {
-      const res = await api.post('/attendance/register-face', {
-        faceDescriptor: vectors,
-      });
-
-      const updatedUser = { ...user, hasFaceEnrolled: true };
-      localStorage.setItem('user', JSON.stringify(updatedUser));
-      setUser(updatedUser);
-      setEnrollmentOpen(false);
-      setMsg(res.data.message || 'Face registered successfully! You can now mark attendance.');
-    } catch (err) {
-      setMsg(err.response?.data?.message || 'Failed to complete registration.');
     }
   };
 
@@ -120,9 +102,20 @@ const EmployeeDashboard = () => {
 
   return (
     <div className="max-w-6xl mx-auto p-3 sm:p-6 space-y-6">
+      {/* Dynamic Alert Banner */}
       {msg && (
-        <div className="p-3 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-lg text-sm">
-          {msg}
+        <div className="p-4 bg-indigo-50 border border-indigo-200 text-indigo-800 rounded-xl text-sm flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+          <span>{msg}</span>
+          
+          {/* Actionable Button if face is missing */}
+          {(needsFaceEnrollment || msg.toLowerCase().includes('no registered facial profile')) && (
+            <button
+              onClick={() => handleOpenAttendanceModal('register')}
+              className="bg-indigo-600 hover:bg-indigo-700 text-white font-semibold px-4 py-2 rounded-lg text-xs shadow cursor-pointer whitespace-nowrap"
+            >
+              Register Face Now
+            </button>
+          )}
         </div>
       )}
 
@@ -246,48 +239,7 @@ const EmployeeDashboard = () => {
         </div>
       </div>
 
-      {/* Overtime Claim Modal */}
-      {selectedRecordId && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-40">
-          <div className="bg-white p-6 rounded-xl shadow-lg w-full max-w-sm">
-            <h4 className="text-lg font-bold mb-4 text-gray-800">Claim Overtime Hours</h4>
-            <form onSubmit={handleOvertimeSubmit} className="space-y-4">
-              <input
-                type="number"
-                step="0.5"
-                placeholder="Hours (e.g., 1.5)"
-                required
-                value={overtimeHours}
-                onChange={(e) => setOvertimeHours(e.target.value)}
-                className="w-full p-2.5 border rounded-lg text-sm outline-none focus:ring-2 focus:ring-indigo-500"
-              />
-              <div className="flex justify-end gap-2">
-                <button
-                  type="button"
-                  onClick={() => setSelectedRecordId(null)}
-                  className="px-4 py-2 text-sm bg-gray-100 text-gray-700 rounded-lg hover:bg-gray-200 cursor-pointer"
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  className="px-4 py-2 text-sm bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 cursor-pointer"
-                >
-                  Submit
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
-
-      {/* First-Time Multi-Angle Enrollment Modal */}
-      <FaceEnrollmentModal
-        isOpen={enrollmentOpen}
-        onEnrollComplete={handleEnrollComplete}
-      />
-
-      {/* Daily Shift Check In / Out Modal */}
+      {/* Camera Modal (Handles CheckIn, CheckOut, AND Register Face) */}
       <AttendanceCameraModal
         isOpen={modalOpen}
         actionType={actionType}
